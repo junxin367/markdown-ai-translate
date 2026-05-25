@@ -1,0 +1,24 @@
+.github/workflows/release.yml
+  s_aca4f51da5d750::t_ed5c6dbe53a806 8,33,39,46,54,57,61,65,69,74,77
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.1",
+  "base_commit_sha": "2cf5c49073c6af774f46884f48d88ceda99158ef",
+  "prompts": {},
+  "humans": {
+    "h_41e06c727a5312": {
+      "author": "刘俊鑫 <673638712@qq.com>"
+    }
+  },
+  "sessions": {
+    "s_aca4f51da5d750": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e5dd6-b0e1-71d3-9a53-35959a2eb985",
+        "model": "gpt-5.5"
+      },
+      "human_author": "刘俊鑫 <673638712@qq.com>"
+    }
+  }
+}
