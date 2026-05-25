@@ -1,0 +1,14 @@
+README.md
+  h_41e06c727a5312 61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.1",
+  "base_commit_sha": "2354a584feee713643a11faffc7b77dab5e58e09",
+  "prompts": {},
+  "humans": {
+    "h_41e06c727a5312": {
+      "author": "刘俊鑫 <673638712@qq.com>"
+    }
+  }
+}
