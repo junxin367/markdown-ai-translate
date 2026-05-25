@@ -40,10 +40,11 @@ export function splitMarkdown(content: string): Segment[] {
       continue;
     }
 
-    // Blank line = segment boundary for text
+    // Blank lines are markdown structure. Keep them outside translated text so
+    // model output trimming cannot collapse paragraph boundaries.
     if (line.trim() === "") {
-      current.push(line);
       flush("text");
+      segments.push({ type: "code", content: line });
       continue;
     }
 

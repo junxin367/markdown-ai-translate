@@ -1,3 +1,15 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
-  <text x="12" y="17" text-anchor="middle" font-family="Nunito, 'Trebuchet MS', sans-serif" font-size="22" font-weight="900" fill="#4CAF50">zh</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="bg" x1="18" y1="12" x2="110" y2="116" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2563eb"/>
+      <stop offset="0.58" stop-color="#16a34a"/>
+      <stop offset="1" stop-color="#0f766e"/>
+    </linearGradient>
+  </defs>
+  <rect x="10" y="10" width="108" height="108" rx="25" fill="url(#bg)"/>
+  <rect x="24" y="32" width="80" height="54" rx="12" fill="#ffffff" opacity="0.96"/>
+  <text x="64" y="67" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="32" font-weight="800" fill="#1d4ed8">MD</text>
+  <path d="M34 95h36m-8-8 8 8-8 8" fill="none" stroke="#ffffff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" opacity="0.95"/>
+  <rect x="73" y="70" width="32" height="27" rx="8" fill="#16a34a"/>
+  <text x="89" y="91" text-anchor="middle" font-family="Microsoft YaHei, Segoe UI, sans-serif" font-size="19" font-weight="800" fill="#ffffff">译</text>
 </svg>

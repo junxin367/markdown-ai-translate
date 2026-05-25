@@ -1,84 +1,89 @@
-# VSCode Translate
+# Markdown AI Translate By junes
 
-A VS Code extension that translates Markdown files and saves the result as a side-by-side `_zh.md` file, inspired by [kiss-translator](https://github.com/fishjar/kiss-translator).
+Markdown AI Translate By junes 是一个 VS Code Markdown 翻译插件。它通过 OpenAI 兼容 API 翻译当前 Markdown 文件，并在右侧打开临时预览文档，方便并排查看原文和译文。
 
-Open any `.md` file, run the command, and a translated version opens next to the original — translations appear in real-time as each batch completes.
+## 功能特性
 
-## Features
+- **双栏预览**：翻译结果作为未保存的临时 Markdown 文档在右侧打开，不污染项目目录。
+- **增量显示**：翻译批次完成后持续刷新结果文件，不必等待全文结束。
+- **翻译缓存**：缓存保存到 VS Code 扩展存储目录，再次翻译时只处理新增或变更段落。
+- **Markdown 格式保护**：尽量保留标题、段落空行、列表、任务列表、引用、表格、链接、图片路径、行内代码和代码块。
+- **OpenAI 兼容接口**：支持 OpenAI、DeepSeek、智谱 GLM、Ollama 等兼容 `/chat/completions` 的服务。
 
-- **File-based output** — generates `xxx_zh.md` alongside the original, open both side-by-side
-- **Translation cache** — saves to `xxx.translate.json`, skips unchanged paragraphs on re-run
-- **Incremental display** — see translations fill in block by block, no waiting for the full file
-- **Works with any OpenAI-compatible API** — Zhipu (GLM), DeepSeek, OpenAI, Ollama, etc.
-- **Smart markdown protection** — image captions are translated, URLs/paths/code are preserved
+## 使用方法
 
-## Quick Start
+### 1. 配置 API
 
-### 1. Configure API
+首次点击编辑器右上角 **zh** 按钮时，如果还没有配置 API Key，插件会自动打开自己的设置页。
 
-Open VS Code settings (`Ctrl+,`) and set:
+也可以从命令面板打开插件设置：
 
-| Setting | Description | Example |
-|---------|-------------|---------|
-| `vscodeTranslate.apiEndpoint` | OpenAI-compatible base URL | `https://open.bigmodel.cn/api/paas/v4` |
-| `vscodeTranslate.apiKey` | Your API key | `your-api-key` |
-| `vscodeTranslate.model` | Model name | `glm-4-flash`, `deepseek-chat` |
-| `vscodeTranslate.targetLanguage` | Target language | `Chinese` (default) |
+1. 按 `Ctrl+Shift+P` 打开命令面板。
+2. 输入并运行 **打开 Markdown AI Translate 设置**。
+3. VS Code 会直接打开并筛选出本插件的全部设置项。
 
-### 2. Translate
+需要清除翻译缓存时：
 
-1. Open a `.md` file in VS Code
-2. Click the **zh** button in the editor title bar, or press `Ctrl+Shift+P` → run **"Translate Markdown (Bilingual Preview)"**
-3. The translated `xxx_zh.md` opens on the right, translations appear as they complete
-4. Run the command again on the same file — cached blocks load instantly, no API cost
+1. 按 `Ctrl+Shift+P` 打开命令面板。
+2. 输入并运行 **清除 Markdown 翻译缓存**。
+3. 插件会删除保存在 VS Code 扩展存储目录中的翻译缓存文件。
 
-### 3. File layout
+也可以手动打开设置：
 
-```
-my-paper/
-├── my-paper.md              # Original
-├── my-paper_zh.md           # Generated translation
-└── my-paper.translate.json  # Translation cache
-```
+1. 在 VS Code 中按 `Ctrl+,` 打开设置。
+2. 在设置搜索框输入 `markdownAiTranslate`，可以看到本插件的全部设置项。
+3. 填写 `API Key`、`OpenAI 兼容 API 地址`、`模型名称` 和 `目标语言`。
 
-## Supported API Providers
+如果更喜欢直接编辑 JSON，可以打开命令面板，运行 **首选项: 打开用户设置(JSON)**，加入以下配置：
 
-Any service that provides an OpenAI-compatible `/chat/completions` endpoint:
-
-| Provider | Endpoint | Model |
-|----------|----------|-------|
-| Zhipu (GLM) | `https://open.bigmodel.cn/api/paas/v4` | `glm-4-flash` |
-| DeepSeek | `https://api.deepseek.com/v1` | `deepseek-chat` |
-| OpenAI | `https://api.openai.com/v1` | `gpt-4o-mini` |
-| Ollama (local) | `http://localhost:11434/v1` | `llama3` |
-
-## Architecture
-
-```
-src/
-├── extension.ts         # Command registration and activation
-├── fileTranslator.ts    # Main workflow: parse → cache → translate → write
-├── markdownParser.ts    # Split markdown into text/code segments
-├── translator.ts        # OpenAI-compatible API client with URL protection
-└── translationCache.ts  # JSON-based cache keyed by text hash
+```json
+{
+  "markdownAiTranslate.apiEndpoint": "https://api.deepseek.com/v1",
+  "markdownAiTranslate.apiKey": "你的 API Key",
+  "markdownAiTranslate.model": "deepseek-chat",
+  "markdownAiTranslate.targetLanguage": "中文"
+}
 ```
 
-- Markdown is split into segments by blank lines; code blocks are skipped
-- Image/link URLs are replaced with placeholders before translation, restored after — so `![caption](path)` gets the caption translated but the path preserved
-- Consecutive text segments are batched (~3000 chars) to reduce API calls
-- After each batch, the editor content updates in-place via `TextEditor.edit()`
+设置项说明：
 
-## Development
+| 设置项 | 说明 | 示例 |
+| --- | --- | --- |
+| `markdownAiTranslate.apiEndpoint` | OpenAI 兼容 API 地址 | `https://api.deepseek.com/v1` |
+| `markdownAiTranslate.apiKey` | API Key | `你的 API Key` |
+| `markdownAiTranslate.model` | 模型名称 | `deepseek-chat` |
+| `markdownAiTranslate.targetLanguage` | 目标语言 | `中文` |
+| `markdownAiTranslate.customPrompt` | 多行文本输入框。默认填充内置提示词；清空时仍使用内置提示词 | `请保留 Markdown 格式...` |
+
+### 2. 翻译 Markdown
+
+1. 打开任意 `.md` 文件。
+2. 点击编辑器标题栏中的 **zh** 按钮，或通过命令面板运行 **翻译 Markdown（双栏预览）**。
+3. 插件会在右侧打开临时翻译预览文档。
+4. 再次运行时会复用缓存，只翻译未缓存或已变更的内容。
+
+## 文件行为
+
+插件不会在项目目录内生成 `_zh.md` 或 `.translate.json` 文件。翻译结果是未保存的临时文档，缓存位于 VS Code 扩展存储目录中。需要保留译文时，可以手动执行“另存为”。
+
+## 本地开发
 
 ```bash
-npm install           # Install dependencies
-npm run compile       # Production build (esbuild → dist/extension.js)
-npm run watch         # Dev build with watch + sourcemaps
-npm run lint          # TypeScript type check (tsc --noEmit)
+npm install
+npm run compile
+npm run lint
 ```
 
-Press **F5** in VS Code to launch Extension Development Host for testing.
+在 VS Code 中按 `F5` 启动 Extension Development Host，即可调试插件。
 
-## License
+## 本地打包
+
+```bash
+npm run package
+```
+
+打包后会生成 `release/Markdown AI Translate By junes-1.0.0.vsix`，可通过 VS Code 的 **从 VSIX 安装...** 安装。
+
+## 许可证
 
 MIT

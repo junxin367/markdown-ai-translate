@@ -15,9 +15,14 @@ export class TranslationCache {
   private cache = new Map<string, string>();
   private filePath: string;
 
-  constructor(originalUri: vscode.Uri) {
+  constructor(originalUri: vscode.Uri, storageUri: vscode.Uri) {
     const originalPath = originalUri.fsPath;
-    this.filePath = originalPath.replace(/\.md$/, ".translate.json");
+    const cacheDir = path.join(storageUri.fsPath, "cache");
+    fs.mkdirSync(cacheDir, { recursive: true });
+    this.filePath = path.join(
+      cacheDir,
+      `${path.basename(originalPath, ".md")}-${hashText(originalPath)}.translate.json`
+    );
     this.load();
   }
 
@@ -49,4 +54,18 @@ export class TranslationCache {
   set(original: string, translated: string) {
     this.cache.set(hashText(original), translated);
   }
+}
+
+export function clearTranslationCache(storageUri: vscode.Uri): number {
+  const cacheDir = path.join(storageUri.fsPath, "cache");
+  if (!fs.existsSync(cacheDir)) return 0;
+
+  let deleted = 0;
+  for (const entry of fs.readdirSync(cacheDir)) {
+    if (!entry.endsWith(".translate.json")) continue;
+    fs.unlinkSync(path.join(cacheDir, entry));
+    deleted++;
+  }
+
+  return deleted;
 }

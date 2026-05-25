@@ -6,15 +6,16 @@ export interface TranslateOptions {
   apiKey: string;
   model: string;
   targetLanguage: string;
+  customPrompt?: string;
 }
 
-const SYSTEM_PROMPT = `You are a professional translator. Translate the user's text to the target language.
-Rules:
-- Preserve all markdown formatting (headings, lists, links, images, inline code, etc.)
-- Do NOT modify any placeholder tokens like __IMG0__, __LNK0__, __CODE0__
-- Do not translate URLs or image paths
-- Keep the same paragraph structure
-- Output ONLY the translated text, nothing else`;
+const DEFAULT_SYSTEM_PROMPT = `你是一名专业翻译。请把用户提供的文本翻译成目标语言。
+规则：
+- 保留所有 Markdown 格式，包括标题、列表、链接、图片、行内代码等
+- 不要修改任何占位符，例如 __URL0__、__CODE0__、__SEGMENT_0_START__ 或 __SEGMENT_0_END__
+- 不要翻译 URL 或图片路径
+- 保持原有段落结构
+- 只输出翻译后的文本，不要输出任何解释`;
 
 /**
  * Protect URLs/paths in markdown syntax from being garbled by the model.
@@ -60,19 +61,20 @@ export async function translateText(
   options: TranslateOptions
 ): Promise<string> {
   const { protected: protectedText, tokens } = protect(text);
+  const systemPrompt = options.customPrompt?.trim() || DEFAULT_SYSTEM_PROMPT;
 
   const maxRetries = 2;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      const prompt = `Translate the following text to ${options.targetLanguage}. Output ONLY the translation, nothing else.\n\n${protectedText}`;
-      const raw = await callOpenAI(prompt, options);
+      const prompt = `请将以下文本翻译成${options.targetLanguage}。只输出翻译结果，不要输出任何解释。\n\n${protectedText}`;
+      const raw = await callOpenAI(prompt, systemPrompt, options);
       return restore(raw, tokens);
     } catch (err) {
       if (attempt === maxRetries) throw err;
       await sleep(1000 * (attempt + 1));
     }
   }
-  throw new Error("Max retries exceeded");
+  throw new Error("翻译请求重试次数已用完。");
 }
 
 function sleep(ms: number): Promise<void> {
@@ -81,6 +83,7 @@ function sleep(ms: number): Promise<void> {
 
 function callOpenAI(
   prompt: string,
+  systemPrompt: string,
   options: TranslateOptions
 ): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -91,7 +94,7 @@ function callOpenAI(
     const body = JSON.stringify({
       model: options.model,
       messages: [
-        { role: "system", content: SYSTEM_PROMPT },
+        { role: "system", content: systemPrompt },
         { role: "user", content: prompt },
       ],
       temperature: 0.3,
@@ -117,7 +120,7 @@ function callOpenAI(
         if (res.statusCode !== 200) {
           reject(
             new Error(
-              `API error ${res.statusCode}: ${data.slice(0, 200)}`
+              `API 请求失败 ${res.statusCode}: ${data.slice(0, 200)}`
             )
           );
           return;
@@ -126,14 +129,14 @@ function callOpenAI(
           const json = JSON.parse(data);
           const content = json.choices?.[0]?.message?.content;
           if (!content) {
-            reject(new Error("Empty response from API"));
+            reject(new Error("API 返回内容为空。"));
             return;
           }
           resolve(content.trim());
         } catch {
           reject(
             new Error(
-              `Failed to parse API response: ${data.slice(0, 200)}`
+              `解析 API 响应失败: ${data.slice(0, 200)}`
             )
           );
         }
@@ -143,7 +146,7 @@ function callOpenAI(
     req.on("error", reject);
     req.setTimeout(120000, () => {
       req.destroy();
-      reject(new Error("API request timeout (120s)"));
+      reject(new Error("API 请求超时（120 秒）。"));
     });
     req.write(body);
     req.end();

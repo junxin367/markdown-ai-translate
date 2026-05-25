@@ -1,4 +1,3 @@
-import * as fs from "fs";
 import * as vscode from "vscode";
 import { splitMarkdown, reassembleMarkdown, Segment } from "./markdownParser";
 import { translateText, TranslateOptions } from "./translator";
@@ -6,6 +5,18 @@ import { TranslationCache } from "./translationCache";
 
 /** Max characters per batch sent to the API */
 const BATCH_SIZE = 4000;
+
+function segmentStart(index: number): string {
+  return `__SEGMENT_${index}_START__`;
+}
+
+function segmentEnd(index: number): string {
+  return `__SEGMENT_${index}_END__`;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 /** Group consecutive pending segments into batches */
 function groupIntoBatches(
@@ -27,42 +38,209 @@ function groupIntoBatches(
   };
 
   for (const seg of pending) {
-    if (len + seg.content.length > maxChars && indices.length > 0) {
+    const framed = formatBatchSegment(seg.index, seg.content);
+    if (len + framed.length > maxChars && indices.length > 0) {
       flush();
     }
     indices.push(seg.index);
-    joined += (joined ? "\n\n" : "") + seg.content;
-    len += seg.content.length;
+    joined += (joined ? "\n\n" : "") + framed;
+    len += framed.length;
   }
   flush();
   return batches;
 }
 
-export async function translateFile(document: vscode.TextDocument) {
-  const config = vscode.workspace.getConfiguration("vscodeTranslate");
-  const apiKey = config.get<string>("apiKey");
+function formatBatchSegment(index: number, content: string): string {
+  return `${segmentStart(index)}\n${content}\n${segmentEnd(index)}`;
+}
+
+function parseTranslatedBatch(
+  translated: string,
+  indices: number[]
+): Map<number, string> {
+  const results = new Map<number, string>();
+
+  for (const index of indices) {
+    const start = escapeRegExp(segmentStart(index));
+    const end = escapeRegExp(segmentEnd(index));
+    const match = translated.match(
+      new RegExp(
+        `(?:^|\\r?\\n)${start}\\r?\\n([\\s\\S]*?)\\r?\\n${end}(?=\\r?\\n|$)`
+      )
+    );
+    if (match) {
+      results.set(index, match[1]);
+    }
+  }
+
+  return results;
+}
+
+function tablePipeCount(line: string): number {
+  return (line.match(/\|/g) ?? []).length;
+}
+
+function isTableDivider(line: string): boolean {
+  return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
+}
+
+function isTableRow(line: string): boolean {
+  return tablePipeCount(line) >= 2;
+}
+
+function markdownLinePrefix(line: string): string | undefined {
+  const heading = line.match(/^(\s{0,3}#{1,6}\s+)/);
+  if (heading) return heading[1];
+
+  const quoteWithList = line.match(
+    /^(\s*(?:>\s*)+(?:(?:[-+*]|\d+[.)])\s+(?:\[[ xX]\]\s+)?)?)/
+  );
+  if (quoteWithList) return quoteWithList[1];
+
+  const list = line.match(
+    /^(\s*(?:[-+*]|\d+[.)])\s+(?:\[[ xX]\]\s+)?)/
+  );
+  if (list) return list[1];
+
+  return undefined;
+}
+
+function stripMarkdownLinePrefix(line: string): string {
+  return line
+    .replace(/^\s{0,3}#{1,6}\s+/, "")
+    .replace(/^\s*(?:>\s*)+(?:(?:[-+*]|\d+[.)])\s+(?:\[[ xX]\]\s+)?)?/, "")
+    .replace(/^\s*(?:[-+*]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/, "");
+}
+
+function hasMarkdownStructure(content: string): boolean {
+  return content
+    .split("\n")
+    .some((line) => Boolean(markdownLinePrefix(line)) || isTableRow(line));
+}
+
+function preserveMarkdownLine(original: string, translated: string): string {
+  if (isTableDivider(original)) return original;
+
+  if (isTableRow(original)) {
+    return tablePipeCount(translated) === tablePipeCount(original)
+      ? translated
+      : original;
+  }
+
+  const prefix = markdownLinePrefix(original);
+  if (!prefix) return translated;
+
+  return `${prefix}${stripMarkdownLinePrefix(translated).trimStart()}`;
+}
+
+function preserveMarkdownFormat(original: string, translated: string): string {
+  const originalLines = original.split("\n");
+  const translatedLines = translated.split(/\r?\n/);
+
+  if (originalLines.length !== translatedLines.length) {
+    return hasMarkdownStructure(original) ? original : translated;
+  }
+
+  return originalLines
+    .map((line, index) => preserveMarkdownLine(line, translatedLines[index]))
+    .join("\n");
+}
+
+function hasConfiguredValue<T>(
+  config: vscode.WorkspaceConfiguration,
+  key: string
+): boolean {
+  const inspected = config.inspect<T>(key);
+  return Boolean(
+    inspected?.globalValue !== undefined ||
+      inspected?.workspaceValue !== undefined ||
+      inspected?.workspaceFolderValue !== undefined
+  );
+}
+
+function getSetting<T>(
+  config: vscode.WorkspaceConfiguration,
+  legacyConfig: vscode.WorkspaceConfiguration,
+  key: string,
+  fallback: T
+): T {
+  if (hasConfiguredValue<T>(config, key)) {
+    return config.get<T>(key) ?? fallback;
+  }
+
+  if (hasConfiguredValue<T>(legacyConfig, key)) {
+    return legacyConfig.get<T>(key) ?? fallback;
+  }
+
+  return config.get<T>(key) ?? fallback;
+}
+
+async function translateBatchIndividually(
+  indices: number[],
+  segments: Segment[],
+  translations: Map<number, string>,
+  cache: TranslationCache,
+  options: TranslateOptions
+) {
+  await Promise.allSettled(
+    indices.map((segIdx) =>
+      translateText(segments[segIdx].content, options).then((translated) => {
+        const result = preserveMarkdownFormat(
+          segments[segIdx].content,
+          translated
+        );
+        translations.set(segIdx, result);
+        cache.set(segments[segIdx].content, result);
+      })
+    )
+  );
+}
+
+async function openPreviewDocument(content: string): Promise<vscode.TextEditor> {
+  const doc = await vscode.workspace.openTextDocument({
+    content,
+    language: "markdown",
+  });
+  return vscode.window.showTextDocument(doc, {
+    viewColumn: vscode.ViewColumn.Two,
+    preserveFocus: true,
+  });
+}
+
+export async function translateFile(
+  document: vscode.TextDocument,
+  storageUri: vscode.Uri
+) {
+  const config = vscode.workspace.getConfiguration("markdownAiTranslate");
+  const legacyConfig = vscode.workspace.getConfiguration("vscodeTranslate");
+  const apiKey = getSetting(config, legacyConfig, "apiKey", "");
   if (!apiKey) {
     vscode.window.showErrorMessage(
-      "Please set vscodeTranslate.apiKey in settings first."
+      "请先配置 Markdown AI Translate By junes 的 API Key。"
+    );
+    await vscode.commands.executeCommand(
+      "workbench.action.openSettings",
+      "markdownAiTranslate.apiKey"
     );
     return;
   }
 
   const options: TranslateOptions = {
-    apiEndpoint:
-      config.get<string>("apiEndpoint") || "https://api.openai.com/v1",
+    apiEndpoint: getSetting(
+      config,
+      legacyConfig,
+      "apiEndpoint",
+      "https://api.openai.com/v1"
+    ),
     apiKey,
-    model: config.get<string>("model") || "gpt-4o-mini",
-    targetLanguage: config.get<string>("targetLanguage") || "Chinese",
+    model: getSetting(config, legacyConfig, "model", "gpt-4o-mini"),
+    targetLanguage: getSetting(config, legacyConfig, "targetLanguage", "中文"),
+    customPrompt: getSetting(config, legacyConfig, "customPrompt", ""),
   };
-
-  const originalPath = document.uri.fsPath;
-  const translatedPath = originalPath.replace(/\.md$/, "_zh.md");
-  const translatedUri = vscode.Uri.file(translatedPath);
 
   const content = document.getText();
   const segments = splitMarkdown(content);
-  const cache = new TranslationCache(document.uri);
+  const cache = new TranslationCache(document.uri, storageUri);
 
   const pending: { index: number; content: string }[] = [];
   const translations = new Map<number, string>();
@@ -79,23 +257,14 @@ export async function translateFile(document: vscode.TextDocument) {
     }
   }
 
-  // Write initial file
-  fs.writeFileSync(
-    translatedPath,
-    reassembleMarkdown(segments, translations),
-    "utf8"
-  );
+  const initialContent = reassembleMarkdown(segments, translations);
 
   const batches = groupIntoBatches(pending, BATCH_SIZE);
 
   if (pending.length === 0) {
-    const doc = await vscode.workspace.openTextDocument(translatedUri);
-    await vscode.window.showTextDocument(doc, {
-      viewColumn: vscode.ViewColumn.Two,
-      preserveFocus: true,
-    });
+    await openPreviewDocument(initialContent);
     vscode.window.showInformationMessage(
-      "All translations loaded from cache."
+      "所有翻译内容已从缓存加载。"
     );
     return;
   }
@@ -103,57 +272,50 @@ export async function translateFile(document: vscode.TextDocument) {
   await vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
-      title: "Translate",
+      title: "正在翻译 Markdown",
       cancellable: true,
     },
     async (progress, token) => {
-      // Open editor
-      const doc = await vscode.workspace.openTextDocument(translatedUri);
-      const editor = await vscode.window.showTextDocument(doc, {
-        viewColumn: vscode.ViewColumn.Two,
-        preserveFocus: true,
-      });
+      // Open a temporary preview document instead of writing into the project.
+      const editor = await openPreviewDocument(initialContent);
 
       let completed = 0;
 
       // Fire ALL batches concurrently — each writes results to translations map
-      const tasks = batches.map((batch) =>
-        translateText(batch.content, options).then(
-          (translated) => {
-            const parts = translated.split(/\n{2,}/);
-            for (let k = 0; k < batch.indices.length; k++) {
-              const segIdx = batch.indices[k];
-              if (k < parts.length && parts[k].trim()) {
-                translations.set(segIdx, parts[k].trim());
-                cache.set(segments[segIdx].content, parts[k].trim());
-              }
-            }
-            completed++;
-          },
-          () => {
-            // Fallback: translate segments individually
-            return Promise.allSettled(
-              batch.indices.map((segIdx) =>
-                translateText(segments[segIdx].content, options).then((r) => {
-                  translations.set(segIdx, r);
-                  cache.set(segments[segIdx].content, r);
-                })
-              )
-            ).finally(() => completed++);
+      const tasks = batches.map(async (batch) => {
+        try {
+          const translated = await translateText(batch.content, options);
+          const parsed = parseTranslatedBatch(translated, batch.indices);
+          if (parsed.size !== batch.indices.length) {
+            throw new Error("翻译结果未保留段落标记。");
           }
-        )
-      );
+
+          for (const [segIdx, parsedResult] of parsed) {
+            const result = preserveMarkdownFormat(
+              segments[segIdx].content,
+              parsedResult
+            );
+            translations.set(segIdx, result);
+            cache.set(segments[segIdx].content, result);
+          }
+        } catch {
+          await translateBatchIndividually(
+            batch.indices,
+            segments,
+            translations,
+            cache,
+            options
+          );
+        } finally {
+          completed++;
+        }
+      });
 
       // Refresh editor every 300ms with whatever's been translated so far
       const refreshInterval = setInterval(async () => {
         if (token.isCancellationRequested) return;
         await updateEditor(editor, segments, translations);
         cache.save();
-        fs.writeFileSync(
-          translatedPath,
-          reassembleMarkdown(segments, translations),
-          "utf8"
-        );
         progress.report({ message: `${completed} / ${batches.length}` });
       }, 300);
 
@@ -164,11 +326,6 @@ export async function translateFile(document: vscode.TextDocument) {
       // Final update
       await updateEditor(editor, segments, translations);
       cache.save();
-      fs.writeFileSync(
-        translatedPath,
-        reassembleMarkdown(segments, translations),
-        "utf8"
-      );
       progress.report({ message: `${completed} / ${batches.length}` });
     }
   );

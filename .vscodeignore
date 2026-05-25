@@ -2,14 +2,17 @@
 src/**
 test/**
 node_modules/**
+release/**
 .gitignore
 tsconfig.json
 CLAUDE.md
+AGENTS.md
 *.translate.json
 *_zh.md
 markdown-translate-*.vsix
 md-translate-ai-*.vsix
+Markdown AI Translate-*.vsix
+Markdown AI Translate By junes-*.vsix
 resources/icon1.png
 resources/icon2.png
-resources/icon.svg
 resources/Gemini_Generated_Image_y8czcxy8czcxy8cz.png
