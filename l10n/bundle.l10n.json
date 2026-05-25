@@ -1,0 +1,18 @@
+{
+  "Cleared {0} translation cache file(s).": "Cleared {0} translation cache file(s).",
+  "No translation cache files were found.": "No translation cache files were found.",
+  "No editor is currently open.": "No editor is currently open.",
+  "Open a Markdown file first.": "Open a Markdown file first.",
+  "Configure the Markdown AI Translate API key first.": "Configure the Markdown AI Translate API key first.",
+  "All content was loaded from the translation cache.": "All content was loaded from the translation cache.",
+  "Translating Markdown": "Translating Markdown",
+  "Translation output did not preserve segment markers.": "Translation output did not preserve segment markers.",
+  "{0} / {1}": "{0} / {1}",
+  "You are a professional translator. Translate the user-provided text into the target language.\nRules:\n- Preserve all Markdown formatting, including headings, lists, links, images, and inline code\n- Do not modify placeholders such as __URL0__, __CODE0__, __SEGMENT_0_START__, or __SEGMENT_0_END__\n- Do not translate URLs or image paths\n- Keep the original paragraph structure\n- Output only the translated text with no explanations": "You are a professional translator. Translate the user-provided text into the target language.\nRules:\n- Preserve all Markdown formatting, including headings, lists, links, images, and inline code\n- Do not modify placeholders such as __URL0__, __CODE0__, __SEGMENT_0_START__, or __SEGMENT_0_END__\n- Do not translate URLs or image paths\n- Keep the original paragraph structure\n- Output only the translated text with no explanations",
+  "Translate the following text into {0}. Output only the translation with no explanations.\n\n{1}": "Translate the following text into {0}. Output only the translation with no explanations.\n\n{1}",
+  "Translation request retries exhausted.": "Translation request retries exhausted.",
+  "API request failed {0}: {1}": "API request failed {0}: {1}",
+  "The API response was empty.": "The API response was empty.",
+  "Failed to parse API response: {0}": "Failed to parse API response: {0}",
+  "API request timed out (120 seconds).": "API request timed out (120 seconds)."
+}

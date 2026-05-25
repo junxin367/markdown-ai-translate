@@ -1,0 +1,18 @@
+{
+  "Cleared {0} translation cache file(s).": "已清除 {0} 个翻译缓存文件。",
+  "No translation cache files were found.": "当前没有可清除的翻译缓存。",
+  "No editor is currently open.": "当前没有打开的编辑器。",
+  "Open a Markdown file first.": "请先打开一个 Markdown 文件。",
+  "Configure the Markdown AI Translate API key first.": "请先配置 Markdown AI Translate 的 API Key。",
+  "All content was loaded from the translation cache.": "所有翻译内容已从缓存加载。",
+  "Translating Markdown": "正在翻译 Markdown",
+  "Translation output did not preserve segment markers.": "翻译结果未保留段落标记。",
+  "{0} / {1}": "{0} / {1}",
+  "You are a professional translator. Translate the user-provided text into the target language.\nRules:\n- Preserve all Markdown formatting, including headings, lists, links, images, and inline code\n- Do not modify placeholders such as __URL0__, __CODE0__, __SEGMENT_0_START__, or __SEGMENT_0_END__\n- Do not translate URLs or image paths\n- Keep the original paragraph structure\n- Output only the translated text with no explanations": "你是一名专业翻译。请把用户提供的文本翻译成目标语言。\n规则：\n- 保留所有 Markdown 格式，包括标题、列表、链接、图片、行内代码等\n- 不要修改任何占位符，例如 __URL0__、__CODE0__、__SEGMENT_0_START__ 或 __SEGMENT_0_END__\n- 不要翻译 URL 或图片路径\n- 保持原有段落结构\n- 只输出翻译后的文本，不要输出任何解释",
+  "Translate the following text into {0}. Output only the translation with no explanations.\n\n{1}": "请将以下文本翻译成 {0}。只输出翻译结果，不要输出任何解释。\n\n{1}",
+  "Translation request retries exhausted.": "翻译请求重试次数已用完。",
+  "API request failed {0}: {1}": "API 请求失败 {0}: {1}",
+  "The API response was empty.": "API 返回内容为空。",
+  "Failed to parse API response: {0}": "解析 API 响应失败: {0}",
+  "API request timed out (120 seconds).": "API 请求超时（120 秒）。"
+}

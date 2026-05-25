@@ -1,0 +1,112 @@
+name: Release VSIX
+
+on:
+  push:
+    branches:
+      - master
+      - main
+    paths:
+      - package.json
+      - .github/workflows/release.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Detect version change
+        id: version
+        shell: bash
+        run: |
+          current_version="$(node -p "require('./package.json').version")"
+          echo "current_version=${current_version}" >> "$GITHUB_OUTPUT"
+
+          before_sha="${{ github.event.before }}"
+          if [[ "$before_sha" == "0000000000000000000000000000000000000000" ]]; then
+            echo "version_changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if git cat-file -e "${before_sha}:package.json" 2>/dev/null; then
+            previous_version="$(
+              git show "${before_sha}:package.json" | node -e "
+                let data = '';
+                process.stdin.on('data', chunk => data += chunk);
+                process.stdin.on('end', () => process.stdout.write(JSON.parse(data).version || ''));
+              "
+            )"
+          else
+            previous_version=""
+          fi
+
+          echo "previous_version=${previous_version}" >> "$GITHUB_OUTPUT"
+
+          if [[ "$current_version" != "$previous_version" ]]; then
+            echo "version_changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "version_changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Stop when version is unchanged
+        if: steps.version.outputs.version_changed != 'true'
+        run: echo "package.json version unchanged, skipping release."
+
+      - name: Check existing release
+        if: steps.version.outputs.version_changed == 'true'
+        id: release_exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v${{ steps.version.outputs.current_version }}"
+          if gh release view "$tag" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Stop when release already exists
+        if: steps.release_exists.outputs.exists == 'true'
+        run: echo "Release for v${{ steps.version.outputs.current_version }} already exists, skipping."
+
+      - name: Install dependencies
+        if: steps.version.outputs.version_changed == 'true' && steps.release_exists.outputs.exists != 'true'
+        run: npm ci
+
+      - name: Build extension
+        if: steps.version.outputs.version_changed == 'true' && steps.release_exists.outputs.exists != 'true'
+        run: npm run compile
+
+      - name: Package VSIX
+        if: steps.version.outputs.version_changed == 'true' && steps.release_exists.outputs.exists != 'true'
+        run: npm run package
+
+      - name: Create GitHub Release
+        if: steps.version.outputs.version_changed == 'true' && steps.release_exists.outputs.exists != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v${{ steps.version.outputs.current_version }}"
+          asset="release/Markdown AI Translate By junes-${{ steps.version.outputs.current_version }}.vsix"
+          gh release create "$tag" "$asset" \
+            --repo "${{ github.repository }}" \
+            --target "${{ github.sha }}" \
+            --title "$tag" \
+            --generate-notes

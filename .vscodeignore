@@ -3,6 +3,9 @@ src/**
 test/**
 node_modules/**
 release/**
+.github/**
+scripts/**
+docs/**
 .gitignore
 tsconfig.json
 CLAUDE.md

@@ -1,10 +1,14 @@
 {
   "name": "markdown-ai-translate-by-junes",
   "displayName": "Markdown AI Translate By junes",
-  "description": "使用 OpenAI 兼容接口翻译 Markdown 文件，打开临时双栏预览，并尽量保留标题、列表、表格、引用、链接和代码块等 Markdown 格式。",
+  "description": "%extension.description%",
   "version": "1.0.0",
   "publisher": "junes",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/junxin367/Markdown-AI-Translate.git"
+  },
   "icon": "resources/icon.png",
   "keywords": [
     "translate",
@@ -16,6 +20,7 @@
     "deepseek",
     "llm"
   ],
+  "l10n": "./l10n",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -26,26 +31,33 @@
     "onLanguage:markdown",
     "onCommand:markdownAiTranslate.translate",
     "onCommand:markdownAiTranslate.openSettings",
-    "onCommand:markdownAiTranslate.clearCache"
+    "onCommand:markdownAiTranslate.clearCache",
+    "onCommand:markdownAiTranslate.openPreview"
   ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
         "command": "markdownAiTranslate.translate",
-        "title": "翻译 Markdown（双栏预览）",
-        "category": "Markdown AI Translate By junes",
+        "title": "%commands.translate.title%",
+        "shortTitle": "%commands.translate.shortTitle%",
+        "category": "%commands.category%",
         "icon": "resources/icon.svg"
       },
       {
         "command": "markdownAiTranslate.openSettings",
-        "title": "打开 Markdown AI Translate 设置",
-        "category": "Markdown AI Translate By junes"
+        "title": "%commands.openSettings.title%",
+        "category": "%commands.category%"
       },
       {
         "command": "markdownAiTranslate.clearCache",
-        "title": "清除 Markdown 翻译缓存",
-        "category": "Markdown AI Translate By junes"
+        "title": "%commands.clearCache.title%",
+        "category": "%commands.category%"
+      },
+      {
+        "command": "markdownAiTranslate.openPreview",
+        "title": "%commands.openPreview.title%",
+        "category": "%commands.category%"
       }
     ],
     "menus": {
@@ -53,44 +65,85 @@
         {
           "command": "markdownAiTranslate.translate",
           "when": "resourceLangId == markdown",
-          "group": "navigation"
+          "group": "navigation@-10"
+        },
+        {
+          "command": "markdownAiTranslate.openPreview",
+          "when": "resourceLangId == markdown && markdownAiTranslate.isTranslationPreviewDocument",
+          "group": "navigation@-9"
         }
       ]
     },
     "configuration": {
-      "title": "Markdown AI Translate By junes",
-      "markdownDescription": "需要清除翻译缓存时，请在命令面板运行 **清除 Markdown 翻译缓存**。",
+      "title": "%configuration.title%",
+      "markdownDescription": "%configuration.description%",
       "properties": {
         "markdownAiTranslate.apiEndpoint": {
           "type": "string",
           "default": "https://api.openai.com/v1",
           "order": 1,
-          "markdownDescription": "OpenAI 兼容 API 地址，例如 `https://api.deepseek.com/v1`。"
+          "markdownDescription": "%settings.apiEndpoint.description%"
         },
         "markdownAiTranslate.apiKey": {
           "type": "string",
           "default": "",
           "order": 2,
-          "markdownDescription": "翻译服务 API Key。"
+          "markdownDescription": "%settings.apiKey.description%"
         },
         "markdownAiTranslate.model": {
           "type": "string",
           "default": "gpt-4o-mini",
           "order": 3,
-          "markdownDescription": "模型名称，例如 `gpt-4o-mini`、`deepseek-chat`。"
+          "markdownDescription": "%settings.model.description%"
         },
         "markdownAiTranslate.targetLanguage": {
           "type": "string",
-          "default": "中文",
+          "default": "%settings.targetLanguage.default%",
           "order": 4,
-          "markdownDescription": "目标翻译语言，例如中文、日文、韩文。"
+          "markdownDescription": "%settings.targetLanguage.description%"
         },
         "markdownAiTranslate.customPrompt": {
           "type": "string",
-          "default": "你是一名专业翻译。请把用户提供的文本翻译成目标语言。\n规则：\n- 保留所有 Markdown 格式，包括标题、列表、链接、图片、行内代码等\n- 不要修改任何占位符，例如 __URL0__、__CODE0__、__SEGMENT_0_START__ 或 __SEGMENT_0_END__\n- 不要翻译 URL 或图片路径\n- 保持原有段落结构\n- 只输出翻译后的文本，不要输出任何解释",
+          "default": "%settings.customPrompt.default%",
           "order": 5,
           "editPresentation": "multilineText",
-          "markdownDescription": "自定义系统提示词。默认填充内置 Markdown 翻译提示词；如果清空该设置，插件仍会使用内置提示词。修改时请保留对 Markdown 格式和 `__URL0__`、`__CODE0__`、`__SEGMENT_0_START__` 等占位符的保护要求。"
+          "markdownDescription": "%settings.customPrompt.description%"
+        },
+        "markdownAiTranslate.openMode": {
+          "type": "string",
+          "default": "sideBySide",
+          "enum": [
+            "sideBySide",
+            "tab"
+          ],
+          "enumItemLabels": [
+            "%settings.openMode.sideBySide.label%",
+            "%settings.openMode.tab.label%"
+          ],
+          "enumDescriptions": [
+            "%settings.openMode.sideBySide.description%",
+            "%settings.openMode.tab.description%"
+          ],
+          "order": 6,
+          "markdownDescription": "%settings.openMode.description%"
+        },
+        "markdownAiTranslate.openTarget": {
+          "type": "string",
+          "default": "file",
+          "enum": [
+            "file",
+            "preview"
+          ],
+          "enumItemLabels": [
+            "%settings.openTarget.file.label%",
+            "%settings.openTarget.preview.label%"
+          ],
+          "enumDescriptions": [
+            "%settings.openTarget.file.description%",
+            "%settings.openTarget.preview.description%"
+          ],
+          "order": 7,
+          "markdownDescription": "%settings.openTarget.description%"
         }
       }
     }
@@ -99,12 +152,13 @@
     "compile": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node18",
     "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node18 --watch --sourcemap",
     "lint": "tsc --noEmit",
-    "package": "npx @vscode/vsce package --out \"release/Markdown AI Translate By junes-1.0.0.vsix\""
+    "package": "node scripts/package-vsix.cjs"
   },
   "devDependencies": {
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.9.1",
     "esbuild": "^0.20.0",
     "typescript": "^5.4.0"
   },

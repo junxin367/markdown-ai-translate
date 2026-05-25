@@ -175,6 +175,28 @@ function getSetting<T>(
   return config.get<T>(key) ?? fallback;
 }
 
+function getOpenModeSetting(
+  config: vscode.WorkspaceConfiguration
+): "sideBySide" | "tab" {
+  const current = config.get<"sideBySide" | "tab">("openMode");
+  if (current === "sideBySide" || current === "tab") {
+    return current;
+  }
+
+  return "sideBySide";
+}
+
+function getOpenTargetSetting(
+  config: vscode.WorkspaceConfiguration
+): "file" | "preview" {
+  const current = config.get<"file" | "preview">("openTarget");
+  if (current === "file" || current === "preview") {
+    return current;
+  }
+
+  return "file";
+}
+
 async function translateBatchIndividually(
   indices: number[],
   segments: Segment[],
@@ -196,16 +218,70 @@ async function translateBatchIndividually(
   );
 }
 
-async function openPreviewDocument(content: string): Promise<vscode.TextEditor> {
+function getFileOpenOptions(
+  openMode: "sideBySide" | "tab"
+): vscode.TextDocumentShowOptions {
+  return openMode === "sideBySide"
+    ? {
+        viewColumn: vscode.ViewColumn.Two,
+        preserveFocus: true,
+      }
+    : {
+        viewColumn: vscode.ViewColumn.Active,
+        preview: false,
+        preserveFocus: false,
+      };
+}
+
+function getPreviewOpenOptions(
+  openMode: "sideBySide" | "tab"
+): vscode.TextDocumentShowOptions {
+  return openMode === "sideBySide"
+    ? {
+        viewColumn: vscode.ViewColumn.Two,
+        preserveFocus: false,
+      }
+    : {
+        viewColumn: vscode.ViewColumn.Active,
+        preview: false,
+        preserveFocus: false,
+      };
+}
+
+async function openTranslationDocument(
+  content: string
+): Promise<vscode.TextDocument> {
   const doc = await vscode.workspace.openTextDocument({
     content,
     language: "markdown",
   });
-  return vscode.window.showTextDocument(doc, {
-    viewColumn: vscode.ViewColumn.Two,
-    preserveFocus: true,
-  });
+  translationPreviewUris.add(doc.uri.toString());
+  return doc;
 }
+
+async function openTranslationResult(
+  document: vscode.TextDocument,
+  openMode: "sideBySide" | "tab",
+  openTarget: "file" | "preview"
+) {
+  if (openTarget === "file") {
+    await vscode.window.showTextDocument(document, getFileOpenOptions(openMode));
+    return;
+  }
+
+  await vscode.commands.executeCommand(
+    "vscode.openWith",
+    document.uri,
+    "vscode.markdown.preview.editor",
+    getPreviewOpenOptions(openMode)
+  );
+}
+
+export function isTranslationPreviewDocument(document: vscode.TextDocument) {
+  return translationPreviewUris.has(document.uri.toString());
+}
+
+const translationPreviewUris = new Set<string>();
 
 export async function translateFile(
   document: vscode.TextDocument,
@@ -216,7 +292,7 @@ export async function translateFile(
   const apiKey = getSetting(config, legacyConfig, "apiKey", "");
   if (!apiKey) {
     vscode.window.showErrorMessage(
-      "请先配置 Markdown AI Translate By junes 的 API Key。"
+      vscode.l10n.t("Configure the Markdown AI Translate API key first.")
     );
     await vscode.commands.executeCommand(
       "workbench.action.openSettings",
@@ -234,9 +310,16 @@ export async function translateFile(
     ),
     apiKey,
     model: getSetting(config, legacyConfig, "model", "gpt-4o-mini"),
-    targetLanguage: getSetting(config, legacyConfig, "targetLanguage", "中文"),
+    targetLanguage: getSetting(
+      config,
+      legacyConfig,
+      "targetLanguage",
+      vscode.l10n.t("Chinese")
+    ),
     customPrompt: getSetting(config, legacyConfig, "customPrompt", ""),
   };
+  const openMode = getOpenModeSetting(config);
+  const openTarget = getOpenTargetSetting(config);
 
   const content = document.getText();
   const segments = splitMarkdown(content);
@@ -261,10 +344,12 @@ export async function translateFile(
 
   const batches = groupIntoBatches(pending, BATCH_SIZE);
 
+  const translationDocument = await openTranslationDocument(initialContent);
+  await openTranslationResult(translationDocument, openMode, openTarget);
+
   if (pending.length === 0) {
-    await openPreviewDocument(initialContent);
     vscode.window.showInformationMessage(
-      "所有翻译内容已从缓存加载。"
+      vscode.l10n.t("All content was loaded from the translation cache.")
     );
     return;
   }
@@ -272,13 +357,10 @@ export async function translateFile(
   await vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
-      title: "正在翻译 Markdown",
+      title: vscode.l10n.t("Translating Markdown"),
       cancellable: true,
     },
     async (progress, token) => {
-      // Open a temporary preview document instead of writing into the project.
-      const editor = await openPreviewDocument(initialContent);
-
       let completed = 0;
 
       // Fire ALL batches concurrently — each writes results to translations map
@@ -287,7 +369,11 @@ export async function translateFile(
           const translated = await translateText(batch.content, options);
           const parsed = parseTranslatedBatch(translated, batch.indices);
           if (parsed.size !== batch.indices.length) {
-            throw new Error("翻译结果未保留段落标记。");
+            throw new Error(
+              vscode.l10n.t(
+                "Translation output did not preserve segment markers."
+              )
+            );
           }
 
           for (const [segIdx, parsedResult] of parsed) {
@@ -314,9 +400,11 @@ export async function translateFile(
       // Refresh editor every 300ms with whatever's been translated so far
       const refreshInterval = setInterval(async () => {
         if (token.isCancellationRequested) return;
-        await updateEditor(editor, segments, translations);
+        await updateDocument(translationDocument, segments, translations);
         cache.save();
-        progress.report({ message: `${completed} / ${batches.length}` });
+        progress.report({
+          message: vscode.l10n.t("{0} / {1}", completed, batches.length),
+        });
       }, 300);
 
       // Wait for all batches to finish
@@ -324,23 +412,26 @@ export async function translateFile(
       clearInterval(refreshInterval);
 
       // Final update
-      await updateEditor(editor, segments, translations);
+      await updateDocument(translationDocument, segments, translations);
       cache.save();
-      progress.report({ message: `${completed} / ${batches.length}` });
+      progress.report({
+        message: vscode.l10n.t("{0} / {1}", completed, batches.length),
+      });
     }
   );
 }
 
-async function updateEditor(
-  editor: vscode.TextEditor,
+async function updateDocument(
+  document: vscode.TextDocument,
   segments: Segment[],
   translations: Map<number, string>
 ) {
   const newContent = reassembleMarkdown(segments, translations);
-  const doc = editor.document;
   const fullRange = new vscode.Range(
-    doc.positionAt(0),
-    doc.positionAt(doc.getText().length)
+    document.positionAt(0),
+    document.positionAt(document.getText().length)
   );
-  await editor.edit((builder) => builder.replace(fullRange, newContent));
+  const edit = new vscode.WorkspaceEdit();
+  edit.replace(document.uri, fullRange, newContent);
+  await vscode.workspace.applyEdit(edit);
 }
