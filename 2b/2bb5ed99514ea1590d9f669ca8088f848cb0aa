@@ -1,0 +1,53 @@
+package.nls.json
+  s_604cde84352951::t_50dbf0f258e8fb 18-19
+README.md
+  s_604cde84352951::t_51c22d474e2792 57
+src/fileTranslator.ts
+  s_604cde84352951::t_c5f12db35e2d71 51,60,570
+  s_604cde84352951::t_a519610101b759 3-7,63-64,68,74-77,80,554-569,571-572,574-576,578-581,620-624,631,765,874-878
+  s_604cde84352951::t_295d97aba2797d 573,577
+  s_604cde84352951::t_7503ce1a757221 52-56,808-810,829-831,897-900
+l10n/bundle.l10n.json
+  s_604cde84352951::t_15f8864588fc2b 12,14
+src/translator.ts
+  s_604cde84352951::t_de0741a3b0d8d2 11,14-16,20-23,63-108,111-112,115,120-126
+package.nls.zh-cn.json
+  s_604cde84352951::t_103df675ad2871 18-19
+l10n/bundle.l10n.zh-cn.json
+  s_604cde84352951::t_b3349e0035b667 12,14
+.github/workflows/release.yml
+  s_f42fad904b36af::t_d9c6904c236f69 52-80,117
+  s_f42fad904b36af::t_900f1e7d40c5a7 81-90
+package.json
+  h_41e06c727a5312 5
+  s_604cde84352951::t_692d25e0f7c1bb 112-118,122,140,158
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.1",
+  "base_commit_sha": "2b2bb5ed99514ea1590d9f669ca8088f848cb0aa",
+  "prompts": {},
+  "humans": {
+    "h_41e06c727a5312": {
+      "author": "刘俊鑫 <673638712@qq.com>"
+    }
+  },
+  "sessions": {
+    "s_604cde84352951": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e61e3-9b42-73e3-847d-9faf58635169",
+        "model": "gpt-5.5"
+      },
+      "human_author": "刘俊鑫 <673638712@qq.com>"
+    },
+    "s_f42fad904b36af": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e5eb5-9345-7d01-926f-2a021342365c",
+        "model": "gpt-5.5"
+      },
+      "human_author": "刘俊鑫 <673638712@qq.com>"
+    }
+  }
+}
