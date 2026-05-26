@@ -2,7 +2,7 @@
   "name": "markdown-ai-translate-by-junes",
   "displayName": "Markdown AI Translate By junes",
   "description": "%extension.description%",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "publisher": "junes",
   "license": "MIT",
   "repository": {
@@ -109,10 +109,17 @@
           "editPresentation": "multilineText",
           "markdownDescription": "%settings.customPrompt.description%"
         },
+        "markdownAiTranslate.codeCommentPrompt": {
+          "type": "string",
+          "default": "%settings.codeCommentPrompt.default%",
+          "order": 6,
+          "editPresentation": "multilineText",
+          "markdownDescription": "%settings.codeCommentPrompt.description%"
+        },
         "markdownAiTranslate.translateCodeComments": {
           "type": "boolean",
           "default": false,
-          "order": 6,
+          "order": 7,
           "markdownDescription": "%settings.translateCodeComments.description%"
         },
         "markdownAiTranslate.openMode": {
@@ -130,7 +137,7 @@
             "%settings.openMode.sideBySide.description%",
             "%settings.openMode.tab.description%"
           ],
-          "order": 7,
+          "order": 8,
           "markdownDescription": "%settings.openMode.description%"
         },
         "markdownAiTranslate.openTarget": {
@@ -148,7 +155,7 @@
             "%settings.openTarget.file.description%",
             "%settings.openTarget.preview.description%"
           ],
-          "order": 8,
+          "order": 9,
           "markdownDescription": "%settings.openTarget.description%"
         }
       }

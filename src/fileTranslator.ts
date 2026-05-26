@@ -1,6 +1,10 @@
 import * as vscode from "vscode";
 import { splitMarkdown, reassembleMarkdown, Segment } from "./markdownParser";
-import { translateText, TranslateOptions } from "./translator";
+import {
+  translateText,
+  TranslateOptions,
+  TranslatePromptKind,
+} from "./translator";
 import { TranslationCache } from "./translationCache";
 
 /** Max characters per batch sent to the API */
@@ -44,26 +48,36 @@ function escapeRegExp(value: string): string {
 function groupIntoBatches(
   pending: TranslationTask[],
   maxChars: number
-): { ids: number[]; content: string }[] {
-  const batches: { ids: number[]; content: string }[] = [];
+): { ids: number[]; content: string; kind: TranslatePromptKind }[] {
+  const batches: {
+    ids: number[];
+    content: string;
+    kind: TranslatePromptKind;
+  }[] = [];
   let ids: number[] = [];
   let joined = "";
   let len = 0;
+  let kind: TranslatePromptKind | undefined;
 
   const flush = () => {
-    if (ids.length > 0) {
-      batches.push({ ids, content: joined });
+    if (ids.length > 0 && kind) {
+      batches.push({ ids, content: joined, kind });
       ids = [];
       joined = "";
       len = 0;
+      kind = undefined;
     }
   };
 
   for (const seg of pending) {
     const framed = formatBatchSegment(seg.id, seg.content);
-    if (len + framed.length > maxChars && ids.length > 0) {
+    if (
+      ids.length > 0 &&
+      (kind !== seg.kind || len + framed.length > maxChars)
+    ) {
       flush();
     }
+    kind = seg.kind;
     ids.push(seg.id);
     joined += (joined ? "\n\n" : "") + framed;
     len += framed.length;
@@ -537,7 +551,34 @@ function getCustomPromptSetting(
   return getConfiguredSetting<string>(legacyConfig, "customPrompt");
 }
 
-function cacheContentKey(content: string, options: TranslateOptions): string {
+function getCodeCommentPromptSetting(
+  config: vscode.WorkspaceConfiguration,
+  legacyConfig: vscode.WorkspaceConfiguration
+): string | undefined {
+  const currentPrompt = getConfiguredSetting<string>(
+    config,
+    "codeCommentPrompt"
+  );
+  if (currentPrompt !== undefined) return currentPrompt;
+
+  return getConfiguredSetting<string>(legacyConfig, "codeCommentPrompt");
+}
+
+function cacheContentKey(
+  content: string,
+  options: TranslateOptions,
+  kind: TranslatePromptKind
+): string {
+  if (kind === "codeComment") {
+    const codeCommentPrompt = options.codeCommentPrompt?.trim();
+    return JSON.stringify({
+      kind,
+      targetLanguage: options.targetLanguage,
+      codeCommentPrompt: codeCommentPrompt || "__builtin_code_comment_v1__",
+      content,
+    });
+  }
+
   return JSON.stringify({
     targetLanguage: options.targetLanguage,
     customPrompt: options.customPrompt?.trim() ?? "",
@@ -576,14 +617,18 @@ async function translateBatchIndividually(
 ) {
   await Promise.allSettled(
     ids.map((id) =>
-      translateText(tasks.get(id)!.content, options).then((translated) => {
+      translateText(
+        tasks.get(id)!.content,
+        options,
+        tasks.get(id)!.kind
+      ).then((translated) => {
         const task = tasks.get(id)!;
         const result =
           task.kind === "markdown"
             ? preserveMarkdownFormat(task.content, translated)
             : normalizeCodeCommentTranslation(translated);
         translatedTasks.set(id, result);
-        cache.set(cacheContentKey(task.content, options), result);
+        cache.set(cacheContentKey(task.content, options, task.kind), result);
       })
     )
   );
@@ -717,6 +762,7 @@ export async function translateFile(
       vscode.l10n.t("Chinese")
     ),
     customPrompt: getCustomPromptSetting(config, legacyConfig),
+    codeCommentPrompt: getCodeCommentPromptSetting(config, legacyConfig),
   };
   const openMode = getOpenModeSetting(config);
   const openTarget = getOpenTargetSetting(config);
@@ -759,7 +805,9 @@ export async function translateFile(
       if (!segment.content.trim()) continue;
 
       const task = addTask("markdown", i, segment.content);
-      const cached = cache.get(cacheContentKey(task.content, options));
+      const cached = cache.get(
+        cacheContentKey(task.content, options, task.kind)
+      );
       if (cached) {
         translatedTasks.set(task.id, cached);
       } else {
@@ -778,7 +826,9 @@ export async function translateFile(
       const task = addTask("codeComment", i, patch.original);
       patch.taskId = task.id;
 
-      const cached = cache.get(cacheContentKey(task.content, options));
+      const cached = cache.get(
+        cacheContentKey(task.content, options, task.kind)
+      );
       if (cached) {
         translatedTasks.set(task.id, cached);
       } else {
@@ -821,7 +871,11 @@ export async function translateFile(
       // Fire ALL batches concurrently; each writes completed task results.
       const batchPromises = batches.map(async (batch) => {
         try {
-          const translated = await translateText(batch.content, options);
+          const translated = await translateText(
+            batch.content,
+            options,
+            batch.kind
+          );
           const parsed = parseTranslatedBatch(translated, batch.ids);
           if (parsed.size !== batch.ids.length) {
             throw new Error(
@@ -840,7 +894,10 @@ export async function translateFile(
                 ? preserveMarkdownFormat(task.content, parsedResult)
                 : normalizeCodeCommentTranslation(parsedResult);
             translatedTasks.set(taskId, result);
-            cache.set(cacheContentKey(task.content, options), result);
+            cache.set(
+              cacheContentKey(task.content, options, task.kind),
+              result
+            );
           }
         } catch {
           await translateBatchIndividually(

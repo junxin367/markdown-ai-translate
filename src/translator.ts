@@ -8,10 +8,17 @@ export interface TranslateOptions {
   model: string;
   targetLanguage: string;
   customPrompt?: string;
+  codeCommentPrompt?: string;
 }
 
-const DEFAULT_SYSTEM_PROMPT = l10n.t(
+export type TranslatePromptKind = "markdown" | "codeComment";
+
+const DEFAULT_MARKDOWN_SYSTEM_PROMPT = l10n.t(
   "You are a professional translator. Translate the user-provided text into the target language.\nRules:\n- Preserve all Markdown formatting, including headings, lists, links, images, and inline code\n- Do not modify placeholders such as __URL0__, __CODE0__, __SEGMENT_0_START__, or __SEGMENT_0_END__\n- Do not translate URLs or image paths\n- Keep the original paragraph structure\n- Output only the translated text with no explanations"
+);
+
+const DEFAULT_CODE_COMMENT_SYSTEM_PROMPT = l10n.t(
+  "You are a professional technical translator. Translate comment text extracted from fenced code blocks into the target language.\nRules:\n- Translate only natural-language comment text\n- Preserve code identifiers, commands, package names, flags, file paths, URLs, and placeholders such as __URL0__, __CODE0__, __SEGMENT_0_START__, or __SEGMENT_0_END__ exactly\n- Do not add Markdown formatting, bold or italic markers, quote wrappers, comment markers, or explanations\n- Keep the original meaning concise\n- Output only the translated comment text"
 );
 
 /**
@@ -53,29 +60,70 @@ function restore(text: string, tokens: string[]): string {
   return result;
 }
 
+function getSystemPrompt(
+  options: TranslateOptions,
+  promptKind: TranslatePromptKind
+): { prompt: string; isCustom: boolean } {
+  if (promptKind === "codeComment") {
+    const codeCommentPrompt = options.codeCommentPrompt?.trim();
+    return {
+      prompt: codeCommentPrompt || DEFAULT_CODE_COMMENT_SYSTEM_PROMPT,
+      isCustom: Boolean(codeCommentPrompt),
+    };
+  }
+
+  const customPrompt = options.customPrompt?.trim();
+  return {
+    prompt: customPrompt || DEFAULT_MARKDOWN_SYSTEM_PROMPT,
+    isCustom: Boolean(customPrompt),
+  };
+}
+
+function buildUserPrompt(
+  protectedText: string,
+  options: TranslateOptions,
+  promptKind: TranslatePromptKind,
+  hasCustomSystemPrompt: boolean
+): string {
+  if (promptKind === "codeComment") {
+    return l10n.t(
+      "Target language: {0}\n\nComment text:\n{1}",
+      options.targetLanguage,
+      protectedText
+    );
+  }
+
+  return hasCustomSystemPrompt
+    ? l10n.t(
+        "Target language: {0}\n\nText:\n{1}",
+        options.targetLanguage,
+        protectedText
+      )
+    : l10n.t(
+        "Translate the following text into {0}. Output only the translation with no explanations.\n\n{1}",
+        options.targetLanguage,
+        protectedText
+      );
+}
+
 export async function translateText(
   text: string,
-  options: TranslateOptions
+  options: TranslateOptions,
+  promptKind: TranslatePromptKind = "markdown"
 ): Promise<string> {
   const { protected: protectedText, tokens } = protect(text);
-  const customPrompt = options.customPrompt?.trim();
-  const systemPrompt = customPrompt || DEFAULT_SYSTEM_PROMPT;
+  const systemPrompt = getSystemPrompt(options, promptKind);
 
   const maxRetries = 2;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      const prompt = customPrompt
-        ? l10n.t(
-            "Target language: {0}\n\nText:\n{1}",
-            options.targetLanguage,
-            protectedText
-          )
-        : l10n.t(
-            "Translate the following text into {0}. Output only the translation with no explanations.\n\n{1}",
-            options.targetLanguage,
-            protectedText
-          );
-      const raw = await callOpenAI(prompt, systemPrompt, options);
+      const prompt = buildUserPrompt(
+        protectedText,
+        options,
+        promptKind,
+        systemPrompt.isCustom
+      );
+      const raw = await callOpenAI(prompt, systemPrompt.prompt, options);
       return restore(raw, tokens);
     } catch (err) {
       if (attempt === maxRetries) throw err;

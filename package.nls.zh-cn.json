@@ -15,6 +15,8 @@
   "settings.targetLanguage.description": "目标翻译语言，例如中文、日文、韩文。",
   "settings.customPrompt.default": "你是一名专业翻译。请把用户提供的文本翻译成目标语言。\n规则：\n- 保留所有 Markdown 格式，包括标题、列表、链接、图片、行内代码等\n- 不要修改任何占位符，例如 __URL0__、__CODE0__、__SEGMENT_0_START__ 或 __SEGMENT_0_END__\n- 不要翻译 URL 或图片路径\n- 保持原有段落结构\n- 只输出翻译后的文本，不要输出任何解释",
   "settings.customPrompt.description": "自定义系统提示词。默认填充内置 Markdown 翻译提示词；如果清空该设置，插件仍会使用内置提示词。自定义后会替换内置翻译指令，目标语言和待处理文本仍会单独传入。修改时请保留对 Markdown 格式和 `__URL0__`、`__CODE0__`、`__SEGMENT_0_START__` 等占位符的保护要求。",
+  "settings.codeCommentPrompt.default": "你是一名专业技术翻译。请把从代码围栏中提取的注释文本翻译成目标语言。\n规则：\n- 只翻译自然语言注释文本\n- 原样保留代码标识符、命令、包名、参数、文件路径、URL，以及 __URL0__、__CODE0__、__SEGMENT_0_START__ 或 __SEGMENT_0_END__ 等占位符\n- 不要添加 Markdown 加粗或斜体标记、引号包裹、注释符号或解释说明\n- 保持原意简洁\n- 只输出翻译后的注释文本",
+  "settings.codeCommentPrompt.description": "代码围栏内注释专用的自定义系统提示词。清空时使用内置代码注释翻译提示词。仅在启用 `markdownAiTranslate.translateCodeComments` 时生效。",
   "settings.translateCodeComments.description": "是否翻译代码围栏内的注释。默认关闭；关闭后，代码围栏会完全按原文保留。",
   "settings.openMode.description": "控制翻译结果的打开方式。默认双栏；选择 `tab` 时会以新的未保存 Markdown 标签页打开。",
   "settings.openMode.sideBySide.label": "双栏",

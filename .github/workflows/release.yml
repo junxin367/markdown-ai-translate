@@ -49,6 +49,45 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Generate release notes
+        shell: bash
+        run: |
+          current_tag="${{ steps.version.outputs.tag }}"
+          previous_tag="$(git tag --sort=-version:refname | grep -v "^${current_tag}$" | head -n 1 || true)"
+
+          {
+            echo "## 更新内容"
+            echo
+
+            if [ -n "$previous_tag" ]; then
+              range="${previous_tag}..HEAD"
+            else
+              range="HEAD"
+            fi
+
+            mapfile -t commits < <(git log "$range" --pretty=format:'- %s (%h)' --no-merges)
+
+            if [ "${#commits[@]}" -eq 0 ]; then
+              echo "- 本次发布没有新的提交说明。"
+            else
+              printf '%s\n' "${commits[@]}"
+            fi
+
+            if [ -n "$previous_tag" ]; then
+              echo
+              echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${previous_tag}...${current_tag}"
+            fi
+          } > release-notes.md
+
+      - name: Update existing release notes
+        if: steps.release_exists.outputs.exists == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release edit "${{ steps.version.outputs.tag }}" \
+            --repo "${{ github.repository }}" \
+            --notes-file release-notes.md
+
       - name: Stop when release already exists
         if: steps.release_exists.outputs.exists == 'true'
         run: echo "Release for ${{ steps.version.outputs.tag }} already exists, skipping."
@@ -75,4 +114,4 @@ jobs:
             --repo "${{ github.repository }}" \
             --target "${{ github.sha }}" \
             --title "${{ steps.version.outputs.tag }}" \
-            --generate-notes
+            --notes-file release-notes.md
