@@ -58,16 +58,23 @@ export async function translateText(
   options: TranslateOptions
 ): Promise<string> {
   const { protected: protectedText, tokens } = protect(text);
-  const systemPrompt = options.customPrompt?.trim() || DEFAULT_SYSTEM_PROMPT;
+  const customPrompt = options.customPrompt?.trim();
+  const systemPrompt = customPrompt || DEFAULT_SYSTEM_PROMPT;
 
   const maxRetries = 2;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      const prompt = l10n.t(
-        "Translate the following text into {0}. Output only the translation with no explanations.\n\n{1}",
-        options.targetLanguage,
-        protectedText
-      );
+      const prompt = customPrompt
+        ? l10n.t(
+            "Target language: {0}\n\nText:\n{1}",
+            options.targetLanguage,
+            protectedText
+          )
+        : l10n.t(
+            "Translate the following text into {0}. Output only the translation with no explanations.\n\n{1}",
+            options.targetLanguage,
+            protectedText
+          );
       const raw = await callOpenAI(prompt, systemPrompt, options);
       return restore(raw, tokens);
     } catch (err) {

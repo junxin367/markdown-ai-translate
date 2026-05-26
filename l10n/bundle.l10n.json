@@ -9,6 +9,7 @@
   "Translation output did not preserve segment markers.": "Translation output did not preserve segment markers.",
   "{0} / {1}": "{0} / {1}",
   "You are a professional translator. Translate the user-provided text into the target language.\nRules:\n- Preserve all Markdown formatting, including headings, lists, links, images, and inline code\n- Do not modify placeholders such as __URL0__, __CODE0__, __SEGMENT_0_START__, or __SEGMENT_0_END__\n- Do not translate URLs or image paths\n- Keep the original paragraph structure\n- Output only the translated text with no explanations": "You are a professional translator. Translate the user-provided text into the target language.\nRules:\n- Preserve all Markdown formatting, including headings, lists, links, images, and inline code\n- Do not modify placeholders such as __URL0__, __CODE0__, __SEGMENT_0_START__, or __SEGMENT_0_END__\n- Do not translate URLs or image paths\n- Keep the original paragraph structure\n- Output only the translated text with no explanations",
+  "Target language: {0}\n\nText:\n{1}": "Target language: {0}\n\nText:\n{1}",
   "Translate the following text into {0}. Output only the translation with no explanations.\n\n{1}": "Translate the following text into {0}. Output only the translation with no explanations.\n\n{1}",
   "Translation request retries exhausted.": "Translation request retries exhausted.",
   "API request failed {0}: {1}": "API request failed {0}: {1}",

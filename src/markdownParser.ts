@@ -61,16 +61,13 @@ export function splitMarkdown(content: string): Segment[] {
 
 /**
  * Reassemble segments into a single markdown string.
- * Replaces text segments with their translations.
+ * Replaces segments with their translated content when available.
  */
 export function reassembleMarkdown(
   segments: Segment[],
   translations: Map<number, string>
 ): string {
   return segments
-    .map((seg, i) => {
-      if (seg.type === "code") return seg.content;
-      return translations.get(i) ?? seg.content;
-    })
+    .map((seg, i) => translations.get(i) ?? seg.content)
     .join("\n");
 }

@@ -6,6 +6,28 @@ import { TranslationCache } from "./translationCache";
 /** Max characters per batch sent to the API */
 const BATCH_SIZE = 4000;
 
+type TranslationTaskKind = "markdown" | "codeComment";
+
+interface TranslationTask {
+  id: number;
+  kind: TranslationTaskKind;
+  segmentIndex: number;
+  content: string;
+}
+
+interface CodeCommentPatch {
+  lineIndex: number;
+  start: number;
+  end: number;
+  original: string;
+  taskId?: number;
+}
+
+interface CommentSyntax {
+  lineMarkers: string[];
+  blockMarkers: { start: string; end: string }[];
+}
+
 function segmentStart(index: number): string {
   return `__SEGMENT_${index}_START__`;
 }
@@ -20,29 +42,29 @@ function escapeRegExp(value: string): string {
 
 /** Group consecutive pending segments into batches */
 function groupIntoBatches(
-  pending: { index: number; content: string }[],
+  pending: TranslationTask[],
   maxChars: number
-): { indices: number[]; content: string }[] {
-  const batches: { indices: number[]; content: string }[] = [];
-  let indices: number[] = [];
+): { ids: number[]; content: string }[] {
+  const batches: { ids: number[]; content: string }[] = [];
+  let ids: number[] = [];
   let joined = "";
   let len = 0;
 
   const flush = () => {
-    if (indices.length > 0) {
-      batches.push({ indices, content: joined });
-      indices = [];
+    if (ids.length > 0) {
+      batches.push({ ids, content: joined });
+      ids = [];
       joined = "";
       len = 0;
     }
   };
 
   for (const seg of pending) {
-    const framed = formatBatchSegment(seg.index, seg.content);
-    if (len + framed.length > maxChars && indices.length > 0) {
+    const framed = formatBatchSegment(seg.id, seg.content);
+    if (len + framed.length > maxChars && ids.length > 0) {
       flush();
     }
-    indices.push(seg.index);
+    ids.push(seg.id);
     joined += (joined ? "\n\n" : "") + framed;
     len += framed.length;
   }
@@ -146,6 +168,329 @@ function preserveMarkdownFormat(original: string, translated: string): string {
     .join("\n");
 }
 
+function normalizeFenceLanguage(info: string): string {
+  const firstToken = info.trim().split(/\s+/)[0] ?? "";
+  return firstToken
+    .replace(/^\{?\.?/, "")
+    .replace(/[},].*$/, "")
+    .toLowerCase();
+}
+
+function codeFenceLanguage(content: string): string {
+  const firstLine = content.split(/\r?\n/, 1)[0] ?? "";
+  const match = firstLine.match(/^\s*(`{3,}|~{3,})(.*)$/);
+  return match ? normalizeFenceLanguage(match[2]) : "";
+}
+
+function addUnique<T>(items: T[], item: T) {
+  if (!items.includes(item)) {
+    items.push(item);
+  }
+}
+
+function getCommentSyntax(language: string): CommentSyntax {
+  const syntax: CommentSyntax = { lineMarkers: [], blockMarkers: [] };
+  const slashLanguages = new Set([
+    "c",
+    "cc",
+    "cpp",
+    "cxx",
+    "h",
+    "hpp",
+    "cs",
+    "csharp",
+    "dart",
+    "go",
+    "java",
+    "js",
+    "jsx",
+    "jsonc",
+    "kt",
+    "kotlin",
+    "php",
+    "rs",
+    "rust",
+    "scala",
+    "swift",
+    "ts",
+    "tsx",
+  ]);
+  const hashLanguages = new Set([
+    "bash",
+    "conf",
+    "config",
+    "dockerfile",
+    "ini",
+    "makefile",
+    "perl",
+    "pl",
+    "powershell",
+    "ps1",
+    "py",
+    "python",
+    "r",
+    "rb",
+    "ruby",
+    "sh",
+    "shell",
+    "toml",
+    "yaml",
+    "yml",
+    "zsh",
+  ]);
+  const dashLanguages = new Set(["ada", "hs", "haskell", "lua", "sql"]);
+  const htmlLanguages = new Set([
+    "html",
+    "markdown",
+    "md",
+    "svelte",
+    "svg",
+    "vue",
+    "xml",
+  ]);
+  const percentLanguages = new Set(["erlang", "latex", "matlab", "octave", "tex"]);
+
+  if (!language) {
+    addUnique(syntax.lineMarkers, "//");
+    addUnique(syntax.lineMarkers, "#");
+    addUnique(syntax.lineMarkers, "--");
+    syntax.blockMarkers.push({ start: "/*", end: "*/" });
+    syntax.blockMarkers.push({ start: "<!--", end: "-->" });
+    return syntax;
+  }
+
+  if (slashLanguages.has(language)) {
+    addUnique(syntax.lineMarkers, "//");
+    syntax.blockMarkers.push({ start: "/*", end: "*/" });
+  }
+
+  if (language === "css" || language === "scss" || language === "less") {
+    syntax.blockMarkers.push({ start: "/*", end: "*/" });
+  }
+
+  if (hashLanguages.has(language)) {
+    addUnique(syntax.lineMarkers, "#");
+  }
+
+  if (dashLanguages.has(language)) {
+    addUnique(syntax.lineMarkers, "--");
+  }
+
+  if (htmlLanguages.has(language)) {
+    syntax.blockMarkers.push({ start: "<!--", end: "-->" });
+  }
+
+  if (percentLanguages.has(language)) {
+    addUnique(syntax.lineMarkers, "%");
+  }
+
+  return syntax;
+}
+
+function isValidMarker(line: string, index: number, marker: string): boolean {
+  if (marker === "#") {
+    return line.slice(index, index + 2) !== "#!";
+  }
+
+  return true;
+}
+
+function findMarkerOutsideStrings(
+  line: string,
+  markers: string[]
+): { index: number; marker: string } | undefined {
+  const sortedMarkers = [...markers].sort((a, b) => b.length - a.length);
+  let quote: string | undefined;
+  let escaped = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (char === quote) {
+        quote = undefined;
+      }
+      continue;
+    }
+
+    for (const marker of sortedMarkers) {
+      if (line.startsWith(marker, i) && isValidMarker(line, i, marker)) {
+        return { index: i, marker };
+      }
+    }
+
+    if (char === "'" || char === '"' || char === "`") {
+      quote = char;
+    }
+  }
+
+  return undefined;
+}
+
+function findBlockMarkerOutsideStrings(
+  line: string,
+  markers: { start: string; end: string }[]
+): { index: number; marker: { start: string; end: string } } | undefined {
+  const found = findMarkerOutsideStrings(
+    line,
+    markers.map((marker) => marker.start)
+  );
+  if (!found) return undefined;
+
+  const marker = markers.find((item) => item.start === found.marker);
+  return marker ? { index: found.index, marker } : undefined;
+}
+
+function trimmedCommentRange(
+  line: string,
+  start: number,
+  end: number,
+  stripLeadingStar: boolean
+): { start: number; end: number } | undefined {
+  let textStart = start;
+  let textEnd = end;
+
+  while (textStart < textEnd && /\s/.test(line[textStart])) {
+    textStart++;
+  }
+
+  if (stripLeadingStar && line[textStart] === "*") {
+    textStart++;
+    if (line[textStart] === " ") {
+      textStart++;
+    }
+  }
+
+  while (textEnd > textStart && /\s/.test(line[textEnd - 1])) {
+    textEnd--;
+  }
+
+  return textEnd > textStart ? { start: textStart, end: textEnd } : undefined;
+}
+
+function addCommentPatch(
+  patches: CodeCommentPatch[],
+  lineIndex: number,
+  line: string,
+  start: number,
+  end: number,
+  stripLeadingStar: boolean
+) {
+  const range = trimmedCommentRange(line, start, end, stripLeadingStar);
+  if (!range) return;
+
+  patches.push({
+    lineIndex,
+    start: range.start,
+    end: range.end,
+    original: line.slice(range.start, range.end),
+  });
+}
+
+function extractCodeCommentPatches(content: string): CodeCommentPatch[] {
+  const language = codeFenceLanguage(content);
+  const syntax = getCommentSyntax(language);
+  if (syntax.lineMarkers.length === 0 && syntax.blockMarkers.length === 0) {
+    return [];
+  }
+
+  const lines = content.split("\n");
+  if (lines.length < 3) return [];
+
+  const patches: CodeCommentPatch[] = [];
+  let activeBlockEnd: string | undefined;
+
+  for (let lineIndex = 1; lineIndex < lines.length - 1; lineIndex++) {
+    const line = lines[lineIndex];
+
+    if (activeBlockEnd) {
+      const endIndex = line.indexOf(activeBlockEnd);
+      addCommentPatch(
+        patches,
+        lineIndex,
+        line,
+        0,
+        endIndex >= 0 ? endIndex : line.length,
+        true
+      );
+      if (endIndex >= 0) {
+        activeBlockEnd = undefined;
+      }
+      continue;
+    }
+
+    const lineComment = findMarkerOutsideStrings(line, syntax.lineMarkers);
+    const blockComment = findBlockMarkerOutsideStrings(
+      line,
+      syntax.blockMarkers
+    );
+
+    if (lineComment && (!blockComment || lineComment.index < blockComment.index)) {
+      addCommentPatch(
+        patches,
+        lineIndex,
+        line,
+        lineComment.index + lineComment.marker.length,
+        line.length,
+        false
+      );
+      continue;
+    }
+
+    if (!blockComment) continue;
+
+    const contentStart = blockComment.index + blockComment.marker.start.length;
+    const contentEnd = line.indexOf(blockComment.marker.end, contentStart);
+    addCommentPatch(
+      patches,
+      lineIndex,
+      line,
+      contentStart,
+      contentEnd >= 0 ? contentEnd : line.length,
+      true
+    );
+
+    if (contentEnd < 0) {
+      activeBlockEnd = blockComment.marker.end;
+    }
+  }
+
+  return patches;
+}
+
+function normalizeCodeCommentTranslation(translated: string): string {
+  return translated.replace(/\s*\r?\n\s*/g, " ").trim();
+}
+
+function applyCodeCommentTranslations(
+  content: string,
+  patches: CodeCommentPatch[],
+  translatedTasks: Map<number, string>
+): string {
+  const lines = content.split("\n");
+
+  for (const patch of patches) {
+    if (patch.taskId === undefined) continue;
+
+    const translated = translatedTasks.get(patch.taskId);
+    if (!translated) continue;
+
+    const line = lines[patch.lineIndex];
+    lines[patch.lineIndex] =
+      line.slice(0, patch.start) + translated + line.slice(patch.end);
+  }
+
+  return lines.join("\n");
+}
+
 function hasConfiguredValue<T>(
   config: vscode.WorkspaceConfiguration,
   key: string
@@ -175,6 +520,31 @@ function getSetting<T>(
   return config.get<T>(key) ?? fallback;
 }
 
+function getConfiguredSetting<T>(
+  config: vscode.WorkspaceConfiguration,
+  key: string
+): T | undefined {
+  return hasConfiguredValue<T>(config, key) ? config.get<T>(key) : undefined;
+}
+
+function getCustomPromptSetting(
+  config: vscode.WorkspaceConfiguration,
+  legacyConfig: vscode.WorkspaceConfiguration
+): string | undefined {
+  const currentPrompt = getConfiguredSetting<string>(config, "customPrompt");
+  if (currentPrompt !== undefined) return currentPrompt;
+
+  return getConfiguredSetting<string>(legacyConfig, "customPrompt");
+}
+
+function cacheContentKey(content: string, options: TranslateOptions): string {
+  return JSON.stringify({
+    targetLanguage: options.targetLanguage,
+    customPrompt: options.customPrompt?.trim() ?? "",
+    content,
+  });
+}
+
 function getOpenModeSetting(
   config: vscode.WorkspaceConfiguration
 ): "sideBySide" | "tab" {
@@ -198,21 +568,22 @@ function getOpenTargetSetting(
 }
 
 async function translateBatchIndividually(
-  indices: number[],
-  segments: Segment[],
-  translations: Map<number, string>,
+  ids: number[],
+  tasks: Map<number, TranslationTask>,
+  translatedTasks: Map<number, string>,
   cache: TranslationCache,
   options: TranslateOptions
 ) {
   await Promise.allSettled(
-    indices.map((segIdx) =>
-      translateText(segments[segIdx].content, options).then((translated) => {
-        const result = preserveMarkdownFormat(
-          segments[segIdx].content,
-          translated
-        );
-        translations.set(segIdx, result);
-        cache.set(segments[segIdx].content, result);
+    ids.map((id) =>
+      translateText(tasks.get(id)!.content, options).then((translated) => {
+        const task = tasks.get(id)!;
+        const result =
+          task.kind === "markdown"
+            ? preserveMarkdownFormat(task.content, translated)
+            : normalizeCodeCommentTranslation(translated);
+        translatedTasks.set(id, result);
+        cache.set(cacheContentKey(task.content, options), result);
       })
     )
   );
@@ -283,6 +654,35 @@ export function isTranslationPreviewDocument(document: vscode.TextDocument) {
 
 const translationPreviewUris = new Set<string>();
 
+function buildSegmentTranslations(
+  segments: Segment[],
+  tasks: Map<number, TranslationTask>,
+  translatedTasks: Map<number, string>,
+  codeCommentPatches: Map<number, CodeCommentPatch[]>
+): Map<number, string> {
+  const segmentTranslations = new Map<number, string>();
+
+  for (const task of tasks.values()) {
+    const translated = translatedTasks.get(task.id);
+    if (!translated || task.kind !== "markdown") continue;
+
+    segmentTranslations.set(task.segmentIndex, translated);
+  }
+
+  for (const [segmentIndex, patches] of codeCommentPatches) {
+    const translated = applyCodeCommentTranslations(
+      segments[segmentIndex].content,
+      patches,
+      translatedTasks
+    );
+    if (translated !== segments[segmentIndex].content) {
+      segmentTranslations.set(segmentIndex, translated);
+    }
+  }
+
+  return segmentTranslations;
+}
+
 export async function translateFile(
   document: vscode.TextDocument,
   storageUri: vscode.Uri
@@ -316,31 +716,86 @@ export async function translateFile(
       "targetLanguage",
       vscode.l10n.t("Chinese")
     ),
-    customPrompt: getSetting(config, legacyConfig, "customPrompt", ""),
+    customPrompt: getCustomPromptSetting(config, legacyConfig),
   };
   const openMode = getOpenModeSetting(config);
   const openTarget = getOpenTargetSetting(config);
+  const translateCodeComments = getSetting(
+    config,
+    legacyConfig,
+    "translateCodeComments",
+    false
+  );
 
   const content = document.getText();
   const segments = splitMarkdown(content);
   const cache = new TranslationCache(document.uri, storageUri);
 
-  const pending: { index: number; content: string }[] = [];
-  const translations = new Map<number, string>();
+  const pending: TranslationTask[] = [];
+  const translationTasks = new Map<number, TranslationTask>();
+  const translatedTasks = new Map<number, string>();
+  const codeCommentPatches = new Map<number, CodeCommentPatch[]>();
+  let nextTaskId = 0;
+
+  const addTask = (
+    kind: TranslationTaskKind,
+    segmentIndex: number,
+    taskContent: string
+  ): TranslationTask => {
+    const task = {
+      id: nextTaskId++,
+      kind,
+      segmentIndex,
+      content: taskContent,
+    };
+    translationTasks.set(task.id, task);
+    return task;
+  };
 
   for (let i = 0; i < segments.length; i++) {
-    if (segments[i].type !== "text") continue;
-    if (!segments[i].content.trim()) continue;
+    const segment = segments[i];
 
-    const cached = cache.get(segments[i].content);
-    if (cached) {
-      translations.set(i, cached);
-    } else {
-      pending.push({ index: i, content: segments[i].content });
+    if (segment.type === "text") {
+      if (!segment.content.trim()) continue;
+
+      const task = addTask("markdown", i, segment.content);
+      const cached = cache.get(cacheContentKey(task.content, options));
+      if (cached) {
+        translatedTasks.set(task.id, cached);
+      } else {
+        pending.push(task);
+      }
+      continue;
+    }
+
+    if (!translateCodeComments) continue;
+
+    const patches = extractCodeCommentPatches(segment.content);
+    if (patches.length === 0) continue;
+
+    codeCommentPatches.set(i, patches);
+    for (const patch of patches) {
+      const task = addTask("codeComment", i, patch.original);
+      patch.taskId = task.id;
+
+      const cached = cache.get(cacheContentKey(task.content, options));
+      if (cached) {
+        translatedTasks.set(task.id, cached);
+      } else {
+        pending.push(task);
+      }
     }
   }
 
-  const initialContent = reassembleMarkdown(segments, translations);
+  const initialContent = reassembleMarkdown(
+    segments,
+    buildSegmentTranslations(
+      segments,
+      translationTasks,
+      translatedTasks,
+      codeCommentPatches
+    )
+  );
 
   const batches = groupIntoBatches(pending, BATCH_SIZE);
 
@@ -363,12 +818,12 @@ export async function translateFile(
     async (progress, token) => {
       let completed = 0;
 
-      // Fire ALL batches concurrently — each writes results to translations map
-      const tasks = batches.map(async (batch) => {
+      // Fire ALL batches concurrently; each writes completed task results.
+      const batchPromises = batches.map(async (batch) => {
         try {
           const translated = await translateText(batch.content, options);
-          const parsed = parseTranslatedBatch(translated, batch.indices);
-          if (parsed.size !== batch.indices.length) {
+          const parsed = parseTranslatedBatch(translated, batch.ids);
+          if (parsed.size !== batch.ids.length) {
             throw new Error(
               vscode.l10n.t(
                 "Translation output did not preserve segment markers."
@@ -376,19 +831,22 @@ export async function translateFile(
             );
           }
 
-          for (const [segIdx, parsedResult] of parsed) {
-            const result = preserveMarkdownFormat(
-              segments[segIdx].content,
-              parsedResult
-            );
-            translations.set(segIdx, result);
-            cache.set(segments[segIdx].content, result);
+          for (const [taskId, parsedResult] of parsed) {
+            const task = translationTasks.get(taskId);
+            if (!task) continue;
+
+            const result =
+              task.kind === "markdown"
+                ? preserveMarkdownFormat(task.content, parsedResult)
+                : normalizeCodeCommentTranslation(parsedResult);
+            translatedTasks.set(taskId, result);
+            cache.set(cacheContentKey(task.content, options), result);
           }
         } catch {
           await translateBatchIndividually(
-            batch.indices,
-            segments,
-            translations,
+            batch.ids,
+            translationTasks,
+            translatedTasks,
             cache,
             options
           );
@@ -400,7 +858,16 @@ export async function translateFile(
       // Refresh editor every 300ms with whatever's been translated so far
       const refreshInterval = setInterval(async () => {
         if (token.isCancellationRequested) return;
-        await updateDocument(translationDocument, segments, translations);
+        await updateDocument(
+          translationDocument,
+          segments,
+          buildSegmentTranslations(
+            segments,
+            translationTasks,
+            translatedTasks,
+            codeCommentPatches
+          )
+        );
         cache.save();
         progress.report({
           message: vscode.l10n.t("{0} / {1}", completed, batches.length),
@@ -408,11 +875,20 @@ export async function translateFile(
       }, 300);
 
       // Wait for all batches to finish
-      await Promise.all(tasks);
+      await Promise.all(batchPromises);
       clearInterval(refreshInterval);
 
       // Final update
-      await updateDocument(translationDocument, segments, translations);
+      await updateDocument(
+        translationDocument,
+        segments,
+        buildSegmentTranslations(
+          segments,
+          translationTasks,
+          translatedTasks,
+          codeCommentPatches
+        )
+      );
       cache.save();
       progress.report({
         message: vscode.l10n.t("{0} / {1}", completed, batches.length),
