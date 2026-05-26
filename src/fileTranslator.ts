@@ -579,9 +579,11 @@ function cacheContentKey(
     });
   }
 
+  const customPrompt = options.customPrompt?.trim();
   return JSON.stringify({
+    kind,
     targetLanguage: options.targetLanguage,
-    customPrompt: options.customPrompt?.trim() ?? "",
+    customPrompt: customPrompt || "__builtin_markdown_skill_v3__",
     content,
   });
 }
@@ -640,6 +642,7 @@ function getFileOpenOptions(
   return openMode === "sideBySide"
     ? {
         viewColumn: vscode.ViewColumn.Two,
+        preview: false,
         preserveFocus: true,
       }
     : {
@@ -698,6 +701,7 @@ export function isTranslationPreviewDocument(document: vscode.TextDocument) {
 }
 
 const translationPreviewUris = new Set<string>();
+const activeTranslationUris = new Set<string>();
 
 function buildSegmentTranslations(
   segments: Segment[],
@@ -732,6 +736,14 @@ export async function translateFile(
   document: vscode.TextDocument,
   storageUri: vscode.Uri
 ) {
+  const sourceUri = document.uri.toString();
+  if (activeTranslationUris.has(sourceUri)) {
+    vscode.window.showInformationMessage(
+      vscode.l10n.t("This document is already being translated.")
+    );
+    return;
+  }
+
   const config = vscode.workspace.getConfiguration("markdownAiTranslate");
   const legacyConfig = vscode.workspace.getConfiguration("vscodeTranslate");
   const apiKey = getSetting(config, legacyConfig, "apiKey", "");
@@ -746,212 +758,235 @@ export async function translateFile(
     return;
   }
 
-  const options: TranslateOptions = {
-    apiEndpoint: getSetting(
-      config,
-      legacyConfig,
-      "apiEndpoint",
-      "https://api.openai.com/v1"
-    ),
-    apiKey,
-    model: getSetting(config, legacyConfig, "model", "gpt-4o-mini"),
-    targetLanguage: getSetting(
-      config,
-      legacyConfig,
-      "targetLanguage",
-      vscode.l10n.t("Chinese")
-    ),
-    customPrompt: getCustomPromptSetting(config, legacyConfig),
-    codeCommentPrompt: getCodeCommentPromptSetting(config, legacyConfig),
-  };
-  const openMode = getOpenModeSetting(config);
-  const openTarget = getOpenTargetSetting(config);
-  const translateCodeComments = getSetting(
-    config,
-    legacyConfig,
-    "translateCodeComments",
-    false
-  );
-
-  const content = document.getText();
-  const segments = splitMarkdown(content);
-  const cache = new TranslationCache(document.uri, storageUri);
-
-  const pending: TranslationTask[] = [];
-  const translationTasks = new Map<number, TranslationTask>();
-  const translatedTasks = new Map<number, string>();
-  const codeCommentPatches = new Map<number, CodeCommentPatch[]>();
-  let nextTaskId = 0;
-
-  const addTask = (
-    kind: TranslationTaskKind,
-    segmentIndex: number,
-    taskContent: string
-  ): TranslationTask => {
-    const task = {
-      id: nextTaskId++,
-      kind,
-      segmentIndex,
-      content: taskContent,
+  activeTranslationUris.add(sourceUri);
+  try {
+    const options: TranslateOptions = {
+      apiEndpoint: getSetting(
+        config,
+        legacyConfig,
+        "apiEndpoint",
+        "https://api.openai.com/v1"
+      ),
+      apiKey,
+      model: getSetting(config, legacyConfig, "model", "gpt-4o-mini"),
+      targetLanguage: getSetting(
+        config,
+        legacyConfig,
+        "targetLanguage",
+        vscode.l10n.t("Chinese")
+      ),
+      customPrompt: getCustomPromptSetting(config, legacyConfig),
+      codeCommentPrompt: getCodeCommentPromptSetting(config, legacyConfig),
     };
-    translationTasks.set(task.id, task);
-    return task;
-  };
-
-  for (let i = 0; i < segments.length; i++) {
-    const segment = segments[i];
-
-    if (segment.type === "text") {
-      if (!segment.content.trim()) continue;
-
-      const task = addTask("markdown", i, segment.content);
-      const cached = cache.get(
-        cacheContentKey(task.content, options, task.kind)
-      );
-      if (cached) {
-        translatedTasks.set(task.id, cached);
-      } else {
-        pending.push(task);
-      }
-      continue;
-    }
-
-    if (!translateCodeComments) continue;
-
-    const patches = extractCodeCommentPatches(segment.content);
-    if (patches.length === 0) continue;
-
-    codeCommentPatches.set(i, patches);
-    for (const patch of patches) {
-      const task = addTask("codeComment", i, patch.original);
-      patch.taskId = task.id;
-
-      const cached = cache.get(
-        cacheContentKey(task.content, options, task.kind)
-      );
-      if (cached) {
-        translatedTasks.set(task.id, cached);
-      } else {
-        pending.push(task);
-      }
-    }
-  }
-
-  const initialContent = reassembleMarkdown(
-    segments,
-    buildSegmentTranslations(
-      segments,
-      translationTasks,
-      translatedTasks,
-      codeCommentPatches
-    )
-  );
-
-  const batches = groupIntoBatches(pending, BATCH_SIZE);
-
-  const translationDocument = await openTranslationDocument(initialContent);
-  await openTranslationResult(translationDocument, openMode, openTarget);
-
-  if (pending.length === 0) {
-    vscode.window.showInformationMessage(
-      vscode.l10n.t("All content was loaded from the translation cache.")
+    const openMode = getOpenModeSetting(config);
+    const openTarget = getOpenTargetSetting(config);
+    const translateCodeComments = getSetting(
+      config,
+      legacyConfig,
+      "translateCodeComments",
+      false
     );
-    return;
-  }
 
-  await vscode.window.withProgress(
-    {
-      location: vscode.ProgressLocation.Notification,
-      title: vscode.l10n.t("Translating Markdown"),
-      cancellable: true,
-    },
-    async (progress, token) => {
-      let completed = 0;
+    const content = document.getText();
+    const segments = splitMarkdown(content);
+    const cache = new TranslationCache(document.uri, storageUri);
 
-      // Fire ALL batches concurrently; each writes completed task results.
-      const batchPromises = batches.map(async (batch) => {
-        try {
-          const translated = await translateText(
-            batch.content,
-            options,
-            batch.kind
-          );
-          const parsed = parseTranslatedBatch(translated, batch.ids);
-          if (parsed.size !== batch.ids.length) {
-            throw new Error(
-              vscode.l10n.t(
-                "Translation output did not preserve segment markers."
+    const pending: TranslationTask[] = [];
+    const translationTasks = new Map<number, TranslationTask>();
+    const translatedTasks = new Map<number, string>();
+    const codeCommentPatches = new Map<number, CodeCommentPatch[]>();
+    let nextTaskId = 0;
+
+    const addTask = (
+      kind: TranslationTaskKind,
+      segmentIndex: number,
+      taskContent: string
+    ): TranslationTask => {
+      const task = {
+        id: nextTaskId++,
+        kind,
+        segmentIndex,
+        content: taskContent,
+      };
+      translationTasks.set(task.id, task);
+      return task;
+    };
+
+    for (let i = 0; i < segments.length; i++) {
+      const segment = segments[i];
+
+      if (segment.type === "text") {
+        if (!segment.content.trim()) continue;
+
+        const task = addTask("markdown", i, segment.content);
+        const cached = cache.get(
+          cacheContentKey(task.content, options, task.kind)
+        );
+        if (cached) {
+          translatedTasks.set(task.id, cached);
+        } else {
+          pending.push(task);
+        }
+        continue;
+      }
+
+      if (!translateCodeComments) continue;
+
+      const patches = extractCodeCommentPatches(segment.content);
+      if (patches.length === 0) continue;
+
+      codeCommentPatches.set(i, patches);
+      for (const patch of patches) {
+        const task = addTask("codeComment", i, patch.original);
+        patch.taskId = task.id;
+
+        const cached = cache.get(
+          cacheContentKey(task.content, options, task.kind)
+        );
+        if (cached) {
+          translatedTasks.set(task.id, cached);
+        } else {
+          pending.push(task);
+        }
+      }
+    }
+
+    const initialContent = reassembleMarkdown(
+      segments,
+      buildSegmentTranslations(
+        segments,
+        translationTasks,
+        translatedTasks,
+        codeCommentPatches
+      )
+    );
+
+    const batches = groupIntoBatches(pending, BATCH_SIZE);
+
+    const deferPreviewOpen = openTarget === "preview" && pending.length > 0;
+    let translationDocument: vscode.TextDocument | undefined;
+
+    if (!deferPreviewOpen) {
+      translationDocument = await openTranslationDocument(initialContent);
+      await openTranslationResult(translationDocument, openMode, openTarget);
+    }
+
+    if (pending.length === 0) {
+      vscode.window.showInformationMessage(
+        vscode.l10n.t("All content was loaded from the translation cache.")
+      );
+      return;
+    }
+
+    await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: vscode.l10n.t("Translating Markdown"),
+        cancellable: true,
+      },
+      async (progress, token) => {
+        let completed = 0;
+
+        // Fire ALL batches concurrently; each writes completed task results.
+        const batchPromises = batches.map(async (batch) => {
+          try {
+            const translated = await translateText(
+              batch.content,
+              options,
+              batch.kind
+            );
+            const parsed = parseTranslatedBatch(translated, batch.ids);
+            if (parsed.size !== batch.ids.length) {
+              throw new Error(
+                vscode.l10n.t(
+                  "Translation output did not preserve segment markers."
+                )
+              );
+            }
+
+            for (const [taskId, parsedResult] of parsed) {
+              const task = translationTasks.get(taskId);
+              if (!task) continue;
+
+              const result =
+                task.kind === "markdown"
+                  ? preserveMarkdownFormat(task.content, parsedResult)
+                  : normalizeCodeCommentTranslation(parsedResult);
+              translatedTasks.set(taskId, result);
+              cache.set(
+                cacheContentKey(task.content, options, task.kind),
+                result
+              );
+            }
+          } catch {
+            await translateBatchIndividually(
+              batch.ids,
+              translationTasks,
+              translatedTasks,
+              cache,
+              options
+            );
+          } finally {
+            completed++;
+          }
+        });
+
+        // Refresh editor every 300ms with whatever's been translated so far
+        const refreshInterval = setInterval(async () => {
+          if (token.isCancellationRequested) return;
+          if (translationDocument) {
+            await updateDocument(
+              translationDocument,
+              segments,
+              buildSegmentTranslations(
+                segments,
+                translationTasks,
+                translatedTasks,
+                codeCommentPatches
               )
             );
           }
+          cache.save();
+          progress.report({
+            message: vscode.l10n.t("{0} / {1}", completed, batches.length),
+          });
+        }, 300);
 
-          for (const [taskId, parsedResult] of parsed) {
-            const task = translationTasks.get(taskId);
-            if (!task) continue;
+        // Wait for all batches to finish
+        await Promise.all(batchPromises);
+        clearInterval(refreshInterval);
 
-            const result =
-              task.kind === "markdown"
-                ? preserveMarkdownFormat(task.content, parsedResult)
-                : normalizeCodeCommentTranslation(parsedResult);
-            translatedTasks.set(taskId, result);
-            cache.set(
-              cacheContentKey(task.content, options, task.kind),
-              result
-            );
-          }
-        } catch {
-          await translateBatchIndividually(
-            batch.ids,
-            translationTasks,
-            translatedTasks,
-            cache,
-            options
-          );
-        } finally {
-          completed++;
-        }
-      });
-
-      // Refresh editor every 300ms with whatever's been translated so far
-      const refreshInterval = setInterval(async () => {
-        if (token.isCancellationRequested) return;
-        await updateDocument(
-          translationDocument,
-          segments,
-          buildSegmentTranslations(
-            segments,
-            translationTasks,
-            translatedTasks,
-            codeCommentPatches
-          )
-        );
-        cache.save();
-        progress.report({
-          message: vscode.l10n.t("{0} / {1}", completed, batches.length),
-        });
-      }, 300);
-
-      // Wait for all batches to finish
-      await Promise.all(batchPromises);
-      clearInterval(refreshInterval);
-
-      // Final update
-      await updateDocument(
-        translationDocument,
-        segments,
-        buildSegmentTranslations(
+        // Final update
+        const finalTranslations = buildSegmentTranslations(
           segments,
           translationTasks,
           translatedTasks,
           codeCommentPatches
-        )
-      );
-      cache.save();
-      progress.report({
-        message: vscode.l10n.t("{0} / {1}", completed, batches.length),
-      });
+        );
+        if (translationDocument) {
+          await updateDocument(
+            translationDocument,
+            segments,
+            finalTranslations
+          );
+        } else {
+          translationDocument = await openTranslationDocument(
+            reassembleMarkdown(segments, finalTranslations)
+          );
+        }
+        cache.save();
+        progress.report({
+          message: vscode.l10n.t("{0} / {1}", completed, batches.length),
+        });
+      }
+    );
+
+    if (deferPreviewOpen && translationDocument) {
+      await openTranslationResult(translationDocument, openMode, openTarget);
     }
-  );
+  } finally {
+    activeTranslationUris.delete(sourceUri);
+  }
 }
 
 async function updateDocument(
@@ -960,11 +995,15 @@ async function updateDocument(
   translations: Map<number, string>
 ) {
   const newContent = reassembleMarkdown(segments, translations);
-  const fullRange = new vscode.Range(
-    document.positionAt(0),
-    document.positionAt(document.getText().length)
-  );
-  const edit = new vscode.WorkspaceEdit();
-  edit.replace(document.uri, fullRange, newContent);
-  await vscode.workspace.applyEdit(edit);
+  const currentContent = document.getText();
+
+  if (currentContent !== newContent) {
+    const fullRange = new vscode.Range(
+      document.positionAt(0),
+      document.positionAt(currentContent.length)
+    );
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(document.uri, fullRange, newContent);
+    await vscode.workspace.applyEdit(edit);
+  }
 }

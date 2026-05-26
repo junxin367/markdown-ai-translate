@@ -64,7 +64,7 @@
       "editor/title": [
         {
           "command": "markdownAiTranslate.translate",
-          "when": "resourceLangId == markdown",
+          "when": "resourceLangId == markdown || resourceLangId == skill || resourceExtname == .md",
           "group": "navigation@-10"
         },
         {

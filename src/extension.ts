@@ -5,6 +5,14 @@ import {
 } from "./fileTranslator";
 import { clearTranslationCache } from "./translationCache";
 
+function isTranslatableMarkdownDocument(document: vscode.TextDocument): boolean {
+  return (
+    document.languageId === "markdown" ||
+    document.languageId === "skill" ||
+    document.fileName.toLowerCase().endsWith(".md")
+  );
+}
+
 export function activate(context: vscode.ExtensionContext) {
   const updateTranslationPreviewContext = async (
     editor: vscode.TextEditor | undefined
@@ -65,9 +73,9 @@ export function activate(context: vscode.ExtensionContext) {
       }
 
       const doc = editor.document;
-      if (doc.languageId !== "markdown" && !doc.fileName.endsWith(".md")) {
+      if (!isTranslatableMarkdownDocument(doc)) {
         vscode.window.showWarningMessage(
-          vscode.l10n.t("Open a Markdown file first.")
+          vscode.l10n.t("Open a Markdown or Skill file first.")
         );
         return;
       }
